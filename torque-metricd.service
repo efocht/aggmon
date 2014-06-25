@@ -1,0 +1,6 @@
+[Unit]
+Description=This service retrieves Torque accounting data and stores them in MongoDB
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/torque-metricd

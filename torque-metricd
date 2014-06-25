@@ -1,0 +1,224 @@
+#!/usr/bin/python2
+
+import ConfigParser
+import glob
+import md5
+import os
+import re
+import signal
+import socket
+import sys
+import syslog
+import time
+import psutil
+from metric_store import MongoDBMetricStore, JMetric, NMetric
+
+
+# Constants
+TORQUE_PROC = "pbs_server"
+TORQUE_ACCOUNTING_PATH = "/var/spool/torque/server_priv/accounting"
+TORQUE_LOG_MARKER = { "D" : "deleted",   # job has been deleted
+                      "E" : "exited",    # job has exited (either successfully or unsuccessfully)
+                      "Q" : "queued",    # job has been submitted/queued
+                      "S" : "started",   # an attempt to start the job has been made
+                    }
+
+
+global new_tag
+global acc_file_dir
+
+config_defaults = { 
+        "acc_file_dir" : TORQUE_ACCOUNTING_PATH,
+        "log_level" : "warning",
+}
+
+config = ConfigParser.RawConfigParser( config_defaults )
+config.add_section( "daemon" )
+config.read( "/etc/torque-metricd.conf" )
+log_level = config.get( "daemon", "log_level" )
+acc_file_dir = config.get( "daemon", "acc_file_dir" )
+
+syslog.openlog( "torque-metricd", syslog.LOG_PID, syslog.LOG_DAEMON )
+syslog.setlogmask( syslog.LOG_UPTO( syslog.LOG_WARNING ) ) 
+
+if log_level.lower() == "error":
+    syslog_max_level = syslog.LOG_ERR
+elif log_level.lower() == "warning":
+    syslog_max_level = syslog.LOG_WARNING
+elif log_level.lower() == "info":
+    syslog_max_level = syslog.LOG_INFO
+elif log_level.lower() == "debug":
+    syslog_max_level = syslog.LOG_DEBUG
+else:
+    syslog_max_level = syslog.LOG_WARNING
+    syslog.syslog( syslog.LOG_WARNING, "unknown log level '%s'! Default to 'warning'." % (log_level) )
+
+syslog.setlogmask( syslog.LOG_UPTO( syslog_max_level ) ) 
+
+syslog.syslog( syslog.LOG_INFO, "starting torque-metricd" )
+for line in ["configuration:",
+             "    acc_file_dir = %(acc_file_dir)s",
+             "    log_level = %(log_level)s"]:
+    syslog.syslog( syslog.LOG_DEBUG, line % locals() )
+
+def sig_handler( sig, frame ):
+    if new_tag:
+        put_tag( acc_file_dir, new_tag )
+    syslog.syslog( syslog.LOG_INFO, "terminating due to SIGTERM..." )
+    sys.exit( 0 )
+
+def md5sum( s ):
+    m = md5.new()
+    m.update( s )
+    return m.hexdigest()
+
+def pidof( name ):
+    procs = filter(lambda p: p.name == name, psutil.process_iter())
+    return [p.pid for p in procs]
+
+def torque_pid():
+    while True:
+        pids = pidof( TORQUE_PROC )
+	if pids:
+            return pids[0]
+        syslog.syslog( syslog.LOG_INFO, "waiting for Torque (%s) to start..." % TORQUE_PROC )
+        time.sleep( 30 )
+
+def is_file_open( pid, file_name ):
+    dir = os.path.join( "/proc", str( pid ), "fd" )
+    if os.path.isfile( dir ):
+        syslog.syslog( syslog.LOG_WARNING, "%s seems to have terminated!" % TORQUE_PROC )
+	return False
+    if not os.access( dir, os.R_OK | os.X_OK ):
+        syslog.syslog( syslog.LOG_ERR, "no permissions to access: %s! Terminating..." % dir )
+        sys.exit( 1 )
+
+    for fds in os.listdir( dir ):
+        for fd in fds:
+            full_name = os.path.join( dir, fd )
+            try:
+                file = os.readlink( full_name )
+                if file == file_name:
+                    return True
+            except:
+                pass
+    return False
+
+def tail( pid, file_name ):
+    fd = open( file_name )
+    fd.seek( 0, 2 )
+    sleep = 0.001
+    buf = ""
+    while is_file_open( pid, file_name ):
+        buf = buf + fd.readline()
+        if not buf:
+            time.sleep( sleep )
+            if sleep < 1.0:
+                sleep += 0.001
+            continue
+        sleep = 0.001
+        if buf[-1] != "\n":
+            continue
+        line = buf
+        buf = ""
+        yield line
+    fd.close()
+
+def parse_torque_accounting_log( line ):
+    import time
+    line = line.strip()
+    try:
+        comp = line.split( ";", 3 ) 
+        assert comp[1] in TORQUE_LOG_MARKER.keys(), "Problem with Torque accounting log (unknown event): '%s'" % line
+        timestamp = long( time.mktime( time.strptime( comp[0], "%m/%d/%Y %H:%M:%S" ) ) )    # log (not job) timestamp
+        value = TORQUE_LOG_MARKER[comp[1]]                                                  # event type
+        name = comp[2].replace( ".", "_" )                                                  # jobid
+        payload = comp[3]                                                                   # attribute set
+        metric = JMetric( name=name, source="Torque", time=timestamp, host=host_name, value=value )
+    except Exception as e:
+        syslog.syslog( syslog.LOG_WARNING, "problem with log: '%s'" % line )
+        return None
+
+    for attr_str in payload.split( " " ):
+        attr_str = attr_str.replace( ".", "_" )
+        try:
+            k, v = attr_str.split( "=", 1 )
+            metric[k] = v 
+        except Exception as e:
+            syslog.syslog( syslog.LOG_WARNING, "problem with log (attribute): '%s'" % line )
+            return None
+    return metric
+
+def get_tag( dir ):
+    tag_file_name = dir + "/tag"
+    tag = None
+    if os.path.isfile( tag_file_name ):
+        tag = open( tag_file_name ).read().split()[0]
+	if tag:
+            syslog.syslog( syslog.LOG_DEBUG, "tag file found: %s (%s)" % (tag_file_name, tag) )
+        else:
+	    tag = None
+    return tag
+
+def put_tag( dir, tag ):
+    tag_file_name = dir + "/tag"
+    open( tag_file_name, "w" ).write( tag )
+    syslog.syslog( syslog.LOG_DEBUG, "wrote: %s (%s)" % (tag_file_name, tag) )
+
+acc_file_dir = TORQUE_ACCOUNTING_PATH
+if len( sys.argv ) > 1:
+    acc_file_dir = sys.argv[1]
+
+new_tag = None
+host_name = socket.gethostname()
+tag = get_tag( acc_file_dir )
+tag_found = False
+
+try:
+    store = MongoDBMetricStore()
+except:
+    syslog.syslog( syslog.LOG_ERR, "can't connect to MongoDB! Check auth in mongodb.conf. Terminating..." )
+    sys.exit( 1 )
+
+signal.signal(signal.SIGINT, sig_handler)
+
+# import backlog
+file_names = sorted( glob.glob( acc_file_dir + "/[0-9]*" ) )
+for file_name in file_names:
+    syslog.syslog( syslog.LOG_DEBUG, "importing metrics from: %s" % file_name )
+    new_tag = None
+    with open( file_name ) as f:
+        for line in f:
+            new_tag = md5sum( line )
+            if tag == None:
+                metric = parse_torque_accounting_log( line )
+	        if metric:
+                    try:
+                        store.addMetric( metric )
+                        syslog.syslog( syslog.LOG_DEBUG, "stored: %s" % str( metric ) )
+                    except Exception as e:
+                        syslog.syslog( syslog.LOG_ERR, "failed to store metric: %s, %s" % (type( e ), str( e )) )
+            else:
+                if tag == new_tag:
+                    tag = None
+		    tag_found = True
+if new_tag:
+    put_tag( acc_file_dir, new_tag )
+if tag and not tag_found:
+    syslog.syslog( syslog.LOG_WARNING, "tag (%s) not found in any acc file (%s)!" % (tag, acc_file_dir) )
+
+# tail current file
+while True:
+    pid = torque_pid()
+    file_name = sorted( glob.glob( acc_file_dir + "/[0-9]*" ) )[-1]
+    syslog.syslog( syslog.LOG_INFO, "monitoring acc file: %s" % file_name )
+    for line in tail( pid, file_name ):
+       new_tag = md5sum( line )
+       metric = parse_torque_accounting_log( line )
+       if metric:
+           try:
+               store.addMetric( metric )
+               syslog.syslog( syslog.LOG_DEBUG, "saved: %s" % str( metric ) )
+           except Exception as e:
+               syslog.syslog( syslog.LOG_ERR, "can't store metric: %s, %s" % (type( e ), str( e )) )
+

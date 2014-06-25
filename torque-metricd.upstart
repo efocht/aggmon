@@ -1,0 +1,13 @@
+# torque-metricd - torque-metricd
+#
+# This service retrieves Torque accounting data and stores them in MongoDB
+
+start on runlevel [2345]
+stop on runlevel [S016]
+# the lines below are only working if mongod is an upstart service
+#start on mongod
+#stop on mongod
+
+#oom score 1000
+exec /usr/sbin/torque-metricd
+
