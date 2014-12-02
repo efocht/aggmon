@@ -1,13 +1,13 @@
 Summary: Service to retrieve Torque metrics
 Name: torque-metricd
-Version: 1.0
+Version: 1.1
 Release: 1%{?dist}
 BuildArch: noarch
 Group: System Environment/Base
 License: Proprietary
 Source: torque-metricd-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
-Requires: python metric-store mongodb-server
+Requires: python metric-store mongodb-server python-psutil
 
 %define upstartdir %{_sysconfdir}/init
 %define systemddir %{_prefix}/lib/systemd/system
@@ -40,5 +40,7 @@ rm -rf %{buildroot}
 
 
 %changelog
+* Tue Dec 02 2014 NEC EHPCTC AJ -> 1.1
+- added missing dependency python-psutil
 * Wed Jun 25 2014 NEC EHPCTC AJ -> 1.0
 - version 1.0
