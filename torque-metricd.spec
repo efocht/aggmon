@@ -40,6 +40,8 @@ rm -rf %{buildroot}
 
 
 %changelog
+* Wed Dec 10 2014 NEC EHPCTC AJ -> 1.2
+- added MongoDB host to connect to, various minor improvments
 * Tue Dec 02 2014 NEC EHPCTC AJ -> 1.1
 - added missing dependency python-psutil
 * Wed Jun 25 2014 NEC EHPCTC AJ -> 1.0

@@ -24,12 +24,13 @@ TORQUE_LOG_MARKER = { "D" : "deleted",   # job has been deleted
                     }
 
 
-global new_tag
+global tag_new
 global acc_file_dir
 
 config_defaults = { 
         "acc_file_dir" : TORQUE_ACCOUNTING_PATH,
         "log_level" : "warning",
+	"mongodb_host" : "localhost",
 }
 
 config = ConfigParser.RawConfigParser( config_defaults )
@@ -37,6 +38,7 @@ config.add_section( "daemon" )
 config.read( "/etc/torque-metricd.conf" )
 log_level = config.get( "daemon", "log_level" )
 acc_file_dir = config.get( "daemon", "acc_file_dir" )
+mongodb_host = config.get( "daemon", "mongodb_host" )
 
 syslog.openlog( "torque-metricd", syslog.LOG_PID, syslog.LOG_DAEMON )
 syslog.setlogmask( syslog.LOG_UPTO( syslog.LOG_WARNING ) ) 
@@ -51,19 +53,20 @@ elif log_level.lower() == "debug":
     syslog_max_level = syslog.LOG_DEBUG
 else:
     syslog_max_level = syslog.LOG_WARNING
-    syslog.syslog( syslog.LOG_WARNING, "unknown log level '%s'! Default to 'warning'." % (log_level) )
+    syslog.syslog( syslog.LOG_WARNING, "unknown log level '%s'! Defaults to 'warning'." % (log_level) )
 
 syslog.setlogmask( syslog.LOG_UPTO( syslog_max_level ) ) 
 
-syslog.syslog( syslog.LOG_INFO, "starting torque-metricd" )
+syslog.syslog( syslog.LOG_DEBUG, "starting torque-metricd" )
 for line in ["configuration:",
              "    acc_file_dir = %(acc_file_dir)s",
+             "    mongodb_host = %(mongodb_host)s",
              "    log_level = %(log_level)s"]:
-    syslog.syslog( syslog.LOG_DEBUG, line % locals() )
+    syslog.syslog( syslog.LOG_INFO, line % locals() )
 
 def sig_handler( sig, frame ):
-    if new_tag:
-        put_tag( acc_file_dir, new_tag )
+    if tag_new:
+        put_tag( acc_file_dir, tag_new )
     syslog.syslog( syslog.LOG_INFO, "terminating due to SIGTERM..." )
     sys.exit( 0 )
 
@@ -86,13 +89,12 @@ def torque_pid():
 
 def is_file_open( pid, file_name ):
     dir = os.path.join( "/proc", str( pid ), "fd" )
-    if os.path.isfile( dir ):
+    if not os.path.exists( dir ):
         syslog.syslog( syslog.LOG_WARNING, "%s seems to have terminated!" % TORQUE_PROC )
 	return False
     if not os.access( dir, os.R_OK | os.X_OK ):
         syslog.syslog( syslog.LOG_ERR, "no permissions to access: %s! Terminating..." % dir )
         sys.exit( 1 )
-
     for fds in os.listdir( dir ):
         for fd in fds:
             full_name = os.path.join( dir, fd )
@@ -109,24 +111,34 @@ def tail( pid, file_name ):
     fd.seek( 0, 2 )
     sleep = 0.001
     buf = ""
+    eof = False
     while is_file_open( pid, file_name ):
-        buf = buf + fd.readline()
-        if not buf:
+	while not eof:
+	    # while not at EOF (indicated by readline returning "")
             time.sleep( sleep )
-            if sleep < 1.0:
-                sleep += 0.001
-            continue
-        sleep = 0.001
-        if buf[-1] != "\n":
-            continue
-        line = buf
-        buf = ""
-        yield line
+            buf = buf + fd.readline()
+            if buf == "":
+		eof = True
+                if sleep < 1.0:
+                    sleep += 0.001
+		continue
+            sleep = 0.001
+	    # complete Torque lines always end with "\n"
+	    if buf[-1] != "\n":#
+		eof = False
+                continue
+            line = buf
+	    buf = ""
+            yield line
+        eof = False
     fd.close()
 
 def parse_torque_accounting_log( line ):
     import time
     line = line.strip()
+    if not line:
+        syslog.syslog( syslog.LOG_WARNING, "ignoring empty line" )
+	return None
     try:
         comp = line.split( ";", 3 ) 
         assert comp[1] in TORQUE_LOG_MARKER.keys(), "Problem with Torque accounting log (unknown event): '%s'" % line
@@ -165,17 +177,10 @@ def put_tag( dir, tag ):
     open( tag_file_name, "w" ).write( tag )
     syslog.syslog( syslog.LOG_DEBUG, "wrote: %s (%s)" % (tag_file_name, tag) )
 
-acc_file_dir = TORQUE_ACCOUNTING_PATH
-if len( sys.argv ) > 1:
-    acc_file_dir = sys.argv[1]
-
-new_tag = None
 host_name = socket.gethostname()
-tag = get_tag( acc_file_dir )
-tag_found = False
 
 try:
-    store = MongoDBMetricStore()
+    store = MongoDBMetricStore( host_name=mongodb_host )
 except:
     syslog.syslog( syslog.LOG_ERR, "can't connect to MongoDB! Check auth in mongodb.conf. Terminating..." )
     sys.exit( 1 )
@@ -183,14 +188,16 @@ except:
 signal.signal(signal.SIGINT, sig_handler)
 
 # import backlog
+tag = get_tag( acc_file_dir )
+tag_found = False
+tag_new = None
 file_names = sorted( glob.glob( acc_file_dir + "/[0-9]*" ) )
 for file_name in file_names:
     syslog.syslog( syslog.LOG_DEBUG, "importing metrics from: %s" % file_name )
-    new_tag = None
     with open( file_name ) as f:
         for line in f:
-            new_tag = md5sum( line )
-            if tag == None:
+            tag_new = md5sum( line )
+            if not tag or tag_found:
                 metric = parse_torque_accounting_log( line )
 	        if metric:
                     try:
@@ -199,21 +206,25 @@ for file_name in file_names:
                     except Exception as e:
                         syslog.syslog( syslog.LOG_ERR, "failed to store metric: %s, %s" % (type( e ), str( e )) )
             else:
-                if tag == new_tag:
-                    tag = None
+                if tag_new == tag:
 		    tag_found = True
-if new_tag:
-    put_tag( acc_file_dir, new_tag )
+if tag_new:
+    put_tag( acc_file_dir, tag_new )
 if tag and not tag_found:
     syslog.syslog( syslog.LOG_WARNING, "tag (%s) not found in any acc file (%s)!" % (tag, acc_file_dir) )
 
 # tail current file
 while True:
     pid = torque_pid()
-    file_name = sorted( glob.glob( acc_file_dir + "/[0-9]*" ) )[-1]
+    file_names = sorted( glob.glob( acc_file_dir + "/[0-9]*" ) )
+    if not file_names:
+        syslog.syslog( syslog.LOG_WARNING, "no accounting file found in %s, waiting..." % acc_file_dir )
+        time.sleep( 30 )
+        continue
+    file_name = file_names[-1]
     syslog.syslog( syslog.LOG_INFO, "monitoring acc file: %s" % file_name )
     for line in tail( pid, file_name ):
-       new_tag = md5sum( line )
+       tag_new = md5sum( line )
        metric = parse_torque_accounting_log( line )
        if metric:
            try:
