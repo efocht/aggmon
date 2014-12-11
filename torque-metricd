@@ -1,5 +1,16 @@
 #!/usr/bin/python2
-
+##########################################################################
+#                                                                        #
+#               Copyright (C) 2013 - 2014 NEC HPC Europe.                #
+#                                                                        #
+#  These coded instructions, statements, and computer programs  contain  #
+#  unpublished  proprietary  information of NEC HPC Europe, and are      #
+#  are protected by Federal copyright law.  They  may  not be disclosed  #
+#  to  third  parties  or copied or duplicated in any form, in whole or  #
+#  in part, without the prior written consent of NEC HPC Europe.         #
+#                                                                        #
+##########################################################################
+#
 import ConfigParser
 import glob
 import md5
@@ -17,21 +28,28 @@ from metric_store import MongoDBMetricStore, JMetric, NMetric
 # Constants
 TORQUE_PROC = "pbs_server"
 TORQUE_ACCOUNTING_PATH = "/var/spool/torque/server_priv/accounting"
-TORQUE_LOG_MARKER = { "D" : "deleted",   # job has been deleted
-                      "E" : "exited",    # job has exited (either successfully or unsuccessfully)
-                      "Q" : "queued",    # job has been submitted/queued
-                      "S" : "started",   # an attempt to start the job has been made
+TORQUE_LOG_MARKER = {"A" : "aborted",         # job has been aborted by server
+                     "C" : "checkpointed",    # job has been checkpointed and stopped
+                     "D" : "deleted",         # job has been deleted
+                     "E" : "exited",          # job has exited (either successfully or unsuccessfully)
+                     "Q" : "queued",          # job has been submitted/queued
+                     "R" : "rerun",           # an attempt to rerun the job has been made
+                     "S" : "started",         # an attempt to start the job has been made
+                     "T" : "restarted",       # an attempt to restart the job has been made (after checkpointed)
                     }
-
+LOG_LEVELS = {"error"   : syslog.LOG_ERR,
+              "warning" : syslog.LOG_WARNING,
+              "info"    : syslog.LOG_INFO,
+              "debug"   : syslog.LOG_DEBUG,
+             }
 
 global tag_new
 global acc_file_dir
 
-config_defaults = { 
-        "acc_file_dir" : TORQUE_ACCOUNTING_PATH,
-        "log_level" : "warning",
-	"mongodb_host" : "localhost",
-}
+config_defaults = {"acc_file_dir" : TORQUE_ACCOUNTING_PATH,
+                   "log_level"    : "warning",
+	               "mongodb_host" : "localhost",
+                  }
 
 config = ConfigParser.RawConfigParser( config_defaults )
 config.add_section( "daemon" )
@@ -40,21 +58,13 @@ log_level = config.get( "daemon", "log_level" )
 acc_file_dir = config.get( "daemon", "acc_file_dir" )
 mongodb_host = config.get( "daemon", "mongodb_host" )
 
+try:
+    syslog_max_level = LOG_LEVELS[log_level.lower()]
+except:
+    syslog_max_level = config_defaults["log_level"]
+    syslog.syslog( syslog.LOG_WARNING, "unknown log level '%s'! Defaults to 'warning'." % log_level )
+
 syslog.openlog( "torque-metricd", syslog.LOG_PID, syslog.LOG_DAEMON )
-syslog.setlogmask( syslog.LOG_UPTO( syslog.LOG_WARNING ) ) 
-
-if log_level.lower() == "error":
-    syslog_max_level = syslog.LOG_ERR
-elif log_level.lower() == "warning":
-    syslog_max_level = syslog.LOG_WARNING
-elif log_level.lower() == "info":
-    syslog_max_level = syslog.LOG_INFO
-elif log_level.lower() == "debug":
-    syslog_max_level = syslog.LOG_DEBUG
-else:
-    syslog_max_level = syslog.LOG_WARNING
-    syslog.syslog( syslog.LOG_WARNING, "unknown log level '%s'! Defaults to 'warning'." % (log_level) )
-
 syslog.setlogmask( syslog.LOG_UPTO( syslog_max_level ) ) 
 
 syslog.syslog( syslog.LOG_DEBUG, "starting torque-metricd" )
@@ -113,7 +123,7 @@ def tail( pid, file_name ):
     buf = ""
     eof = False
     while is_file_open( pid, file_name ):
-	while not eof:
+        while not eof:
 	    # while not at EOF (indicated by readline returning "")
             time.sleep( sleep )
             buf = buf + fd.readline()
@@ -138,27 +148,42 @@ def parse_torque_accounting_log( line ):
     line = line.strip()
     if not line:
         syslog.syslog( syslog.LOG_WARNING, "ignoring empty line" )
-	return None
+        return None
+    attributes = {}
     try:
+        # example header: 08/08/2014 11:32:23;S;50438;<payload>
         comp = line.split( ";", 3 ) 
-        assert comp[1] in TORQUE_LOG_MARKER.keys(), "Problem with Torque accounting log (unknown event): '%s'" % line
-        timestamp = long( time.mktime( time.strptime( comp[0], "%m/%d/%Y %H:%M:%S" ) ) )    # log (not job) timestamp
-        value = TORQUE_LOG_MARKER[comp[1]]                                                  # event type
-        name = comp[2].replace( ".", "_" )                                                  # jobid
+        assert comp[1] in TORQUE_LOG_MARKER.keys(), "Torque accounting log (unknown event): '%s'" % comp[1]
+        timestamp = long( time.mktime( time.strptime( comp[0], "%m/%d/%Y %H:%M:%S" ) ) )    # log (not job) timestamp (time, T)
+        value = TORQUE_LOG_MARKER[comp[1]]                                                  # event type (value, V)
+        name = comp[2].replace( ".", "_" )                                                  # jobid (name, N)
         payload = comp[3]                                                                   # attribute set
+        host_name = socket.gethostname()                                                    # add local hostname
         metric = JMetric( name=name, source="Torque", time=timestamp, host=host_name, value=value )
     except Exception as e:
-        syslog.syslog( syslog.LOG_WARNING, "problem with log: '%s'" % line )
+        syslog.syslog( syslog.LOG_WARNING, "Torque accounting log (parsing header failed): '%s'" % line )
         return None
-
     for attr_str in payload.split( " " ):
+        # example payload: user=myuname group=sthaber jobname=STDIN queue=workq ctime=1407490338 qtime=1407490338 etime=1407490338 start=1407490343
+        #     owner=myuname@sb-master exec_host=<exec_host> Resource_List.ncpus=1 Resource_List.neednodes=1:ppn=1:foo:ghz-2.6:mhz-2601:ddr1866:qlogic
+        #     Resource_List.nodect=1 Resource_List.nodes=1:ppn=1:foo:ghz-2.6:mhz-2601:ddr1866:qlogic
         attr_str = attr_str.replace( ".", "_" )
         try:
             k, v = attr_str.split( "=", 1 )
-            metric[k] = v 
         except Exception as e:
-            syslog.syslog( syslog.LOG_WARNING, "problem with log (attribute): '%s'" % line )
+            syslog.syslog( syslog.LOG_WARNING, "Torque accounting log (failed to parse attributes): '%s'" % attr_str )
             return None
+        if k in ["ctime", "qtime", "etime", "start", "end"]:
+            attributes[k] = int( v )
+        if k in ["user", "group", "jobname", "queue", "owner"]:
+            attributes[k] = v
+        if k == "exec_host":
+            # example exec_host: sabi36/19+sabi36/18+sabi36/17+sabi36/16+sabi36/15+sabi36/14+sabi36/13+sabi36/12+sabi36/11...
+            attributes["cnodes"] = list( set( [r.split( "/" )[0] for r in v.split( "+" )] ) )
+        if k.startswith( "Resource_List" ):
+            k = k.replace( "Resource_List", "RL" )
+            attributes[k] = v
+        metric[k] = v 
     return metric
 
 def get_tag( dir ):
@@ -176,8 +201,6 @@ def put_tag( dir, tag ):
     tag_file_name = dir + "/tag"
     open( tag_file_name, "w" ).write( tag )
     syslog.syslog( syslog.LOG_DEBUG, "wrote: %s (%s)" % (tag_file_name, tag) )
-
-host_name = socket.gethostname()
 
 try:
     store = MongoDBMetricStore( host_name=mongodb_host )
@@ -213,7 +236,7 @@ if tag_new:
 if tag and not tag_found:
     syslog.syslog( syslog.LOG_WARNING, "tag (%s) not found in any acc file (%s)!" % (tag, acc_file_dir) )
 
-# tail current file
+# tail current accounting file
 while True:
     pid = torque_pid()
     file_names = sorted( glob.glob( acc_file_dir + "/[0-9]*" ) )
@@ -232,4 +255,3 @@ while True:
                syslog.syslog( syslog.LOG_DEBUG, "saved: %s" % str( metric ) )
            except Exception as e:
                syslog.syslog( syslog.LOG_ERR, "can't store metric: %s, %s" % (type( e ), str( e )) )
-
