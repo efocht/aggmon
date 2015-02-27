@@ -49,6 +49,7 @@ global acc_file_dir
 config_defaults = {"acc_file_dir" : TORQUE_ACCOUNTING_PATH,
                    "log_level"    : "warning",
 	               "mongodb_host" : "localhost",
+                   "include_cpus" : "False"
                   }
 
 config = ConfigParser.RawConfigParser( config_defaults )
@@ -57,6 +58,7 @@ config.read( "/etc/torque-metricd.conf" )
 log_level = config.get( "daemon", "log_level" )
 acc_file_dir = config.get( "daemon", "acc_file_dir" )
 mongodb_host = config.get( "daemon", "mongodb_host" )
+include_cpus = config.getboolean( "daemon", "include_cpus" )
 
 try:
     syslog_max_level = LOG_LEVELS[log_level.lower()]
@@ -149,12 +151,11 @@ def parse_torque_accounting_log( line ):
     if not line:
         syslog.syslog( syslog.LOG_WARNING, "ignoring empty line" )
         return None
-    attributes = {}
     try:
         # example header: 08/08/2014 11:32:23;S;50438;<payload>
         comp = line.split( ";", 3 ) 
         assert comp[1] in TORQUE_LOG_MARKER.keys(), "Torque accounting log (unknown event): '%s'" % comp[1]
-        timestamp = long( time.mktime( time.strptime( comp[0], "%m/%d/%Y %H:%M:%S" ) ) )    # log (not job) timestamp (time, T)
+        timestamp = int( time.mktime( time.strptime( comp[0], "%m/%d/%Y %H:%M:%S" ) ) )    # log (not job) timestamp (time, T)
         value = TORQUE_LOG_MARKER[comp[1]]                                                  # event type (value, V)
         name = comp[2].replace( ".", "_" )                                                  # jobid (name, N)
         payload = comp[3]                                                                   # attribute set
@@ -174,16 +175,24 @@ def parse_torque_accounting_log( line ):
             syslog.syslog( syslog.LOG_WARNING, "Torque accounting log (failed to parse attributes): '%s'" % attr_str )
             return None
         if k in ["ctime", "qtime", "etime", "start", "end"]:
-            attributes[k] = int( v )
-        if k in ["user", "group", "jobname", "queue", "owner"]:
-            attributes[k] = v
-        if k == "exec_host":
+            v = int( v )
+        elif k in ["user", "group", "jobname", "queue", "owner"]:
+            pass
+            # any special treatment here?
+        elif k == "exec_host":
             # example exec_host: sabi36/19+sabi36/18+sabi36/17+sabi36/16+sabi36/15+sabi36/14+sabi36/13+sabi36/12+sabi36/11...
-            attributes["cnodes"] = list( set( [r.split( "/" )[0] for r in v.split( "+" )] ) )
-        if k.startswith( "Resource_List" ):
+            nodes = sorted( list( set( [r.split( "/" )[0] for r in v.split( "+" )] ) ) )
+            k = "cnodes"
+            if include_cpus:
+                cpus = {}
+                for n in nodes:
+                    cpus[n] = sorted( list( set( [int( r.split( "/", 2 )[1] ) for r in v.split( "+" ) if r.split( "/", 2 )[0] == n] ) ) )
+                v = cpus
+            else:
+                v = nodes
+        elif k.startswith( "Resource_List" ): 
             k = k.replace( "Resource_List", "RL" )
-            attributes[k] = v
-        metric[k] = v 
+        metric[k] = v
     return metric
 
 def get_tag( dir ):
@@ -203,7 +212,11 @@ def put_tag( dir, tag ):
     syslog.syslog( syslog.LOG_DEBUG, "wrote: %s (%s)" % (tag_file_name, tag) )
 
 try:
-    store = MongoDBMetricStore( host_name=mongodb_host )
+    store = None
+    if mongodb_host:
+        store = MongoDBMetricStore( host_name=mongodb_host )
+    else:
+        syslog.syslog( syslog.LOG_WARNING, "can't connect to MongoDB! No host name set in configuration file." )
 except:
     syslog.syslog( syslog.LOG_ERR, "can't connect to MongoDB! Check auth in mongodb.conf. Terminating..." )
     sys.exit( 1 )
@@ -222,7 +235,8 @@ for file_name in file_names:
             tag_new = md5sum( line )
             if not tag or tag_found:
                 metric = parse_torque_accounting_log( line )
-	        if metric:
+                print metric
+                if metric:
                     try:
                         store.addMetric( metric )
                         syslog.syslog( syslog.LOG_DEBUG, "stored: %s" % str( metric ) )
@@ -230,7 +244,7 @@ for file_name in file_names:
                         syslog.syslog( syslog.LOG_ERR, "failed to store metric: %s, %s" % (type( e ), str( e )) )
             else:
                 if tag_new == tag:
-		    tag_found = True
+                    tag_found = True
 if tag_new:
     put_tag( acc_file_dir, tag_new )
 if tag and not tag_found:
@@ -247,11 +261,11 @@ while True:
     file_name = file_names[-1]
     syslog.syslog( syslog.LOG_INFO, "monitoring acc file: %s" % file_name )
     for line in tail( pid, file_name ):
-       tag_new = md5sum( line )
-       metric = parse_torque_accounting_log( line )
-       if metric:
-           try:
-               store.addMetric( metric )
-               syslog.syslog( syslog.LOG_DEBUG, "saved: %s" % str( metric ) )
-           except Exception as e:
-               syslog.syslog( syslog.LOG_ERR, "can't store metric: %s, %s" % (type( e ), str( e )) )
+        tag_new = md5sum( line )
+        metric = parse_torque_accounting_log( line )
+        if metric:
+            try:
+                store.addMetric( metric )
+                syslog.syslog( syslog.LOG_DEBUG, "saved: %s" % str( metric ) )
+            except Exception as e:
+                syslog.syslog( syslog.LOG_ERR, "can't store metric: %s, %s" % (type( e ), str( e )) )

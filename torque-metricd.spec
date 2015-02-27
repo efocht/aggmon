@@ -1,6 +1,6 @@
 Summary: Service to retrieve Torque metrics
 Name: torque-metricd
-Version: 1.3
+Version: 1.4
 Release: 1%{?dist}
 BuildArch: noarch
 Group: System Environment/Base
@@ -40,6 +40,8 @@ rm -rf %{buildroot}
 
 
 %changelog
+* Fri Feb 27 2015 NEC EHPCTC AJ -> 1.4
+- added CPUs use by job to job metric (config: include_cpus)
 * Tue Dec 11 2014 NEC EHPCTC AJ -> 1.3
 - changed types of metrics to be stored in MongoDB
 * Wed Dec 10 2014 NEC EHPCTC AJ -> 1.2
