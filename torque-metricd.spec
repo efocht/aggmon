@@ -7,7 +7,7 @@ Group: System Environment/Base
 License: Proprietary
 Source: torque-metricd-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
-Requires: python metric-store mongodb-server python-psutil
+Requires: python metric-store python-psutil
 
 %define upstartdir %{_sysconfdir}/init
 %define systemddir %{_prefix}/lib/systemd/system
