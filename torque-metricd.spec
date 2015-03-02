@@ -42,6 +42,7 @@ rm -rf %{buildroot}
 %changelog
 * Fri Feb 27 2015 NEC EHPCTC AJ -> 1.4
 - added CPUs use by job to job metric (config: include_cpus)
+- added call of tagger (agg_cmd)
 * Tue Dec 11 2014 NEC EHPCTC AJ -> 1.3
 - changed types of metrics to be stored in MongoDB
 * Wed Dec 10 2014 NEC EHPCTC AJ -> 1.2
