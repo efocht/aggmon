@@ -283,7 +283,7 @@ while True:
                 continue
             if call_tagger:
                 try:
-                    agg_cmd_args = ["python", "agg_cmd"]
+                    agg_cmd_args = ["python", "agg_cmd.py"]
                     if agg_cmd_port:
                         agg_cmd_args.extend( ["--cmd_port", agg_cmd_port] )
                     if metric["value"] in ["rerun", "started", "restarted"]:
