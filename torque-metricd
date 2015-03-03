@@ -99,7 +99,7 @@ def pidof( name ):
 def torque_pid():
     while True:
         pids = pidof( TORQUE_PROC )
-	if pids:
+    if pids:
             return pids[0]
         syslog.syslog( syslog.LOG_INFO, "waiting for Torque (%s) to start..." % TORQUE_PROC )
         time.sleep( 30 )
@@ -108,7 +108,7 @@ def is_file_open( pid, file_name ):
     dir = os.path.join( "/proc", str( pid ), "fd" )
     if not os.path.exists( dir ):
         syslog.syslog( syslog.LOG_WARNING, "%s seems to have terminated!" % TORQUE_PROC )
-	return False
+    return False
     if not os.access( dir, os.R_OK | os.X_OK ):
         syslog.syslog( syslog.LOG_ERR, "no permissions to access: %s! Terminating..." % dir )
         sys.exit( 1 )
@@ -131,21 +131,21 @@ def tail( pid, file_name ):
     eof = False
     while is_file_open( pid, file_name ):
         while not eof:
-	    # while not at EOF (indicated by readline returning "")
+        # while not at EOF (indicated by readline returning "")
             time.sleep( sleep )
             buf = buf + fd.readline()
             if buf == "":
-		eof = True
+        eof = True
                 if sleep < 1.0:
                     sleep += 0.001
-		continue
+        continue
             sleep = 0.001
-	    # complete Torque lines always end with "\n"
-	    if buf[-1] != "\n":#
-		eof = False
+        # complete Torque lines always end with "\n"
+        if buf[-1] != "\n":#
+        eof = False
                 continue
             line = buf
-	    buf = ""
+        buf = ""
             yield line
         eof = False
     fd.close()
@@ -205,10 +205,10 @@ def get_tag( dir ):
     tag = None
     if os.path.isfile( tag_file_name ):
         tag = open( tag_file_name ).read().split()[0]
-	if tag:
+    if tag:
             syslog.syslog( syslog.LOG_DEBUG, "tag file found: %s (%s)" % (tag_file_name, tag) )
         else:
-	    tag = None
+        tag = None
     return tag
 
 def put_tag( dir, tag ):
@@ -240,7 +240,6 @@ for file_name in file_names:
             tag_new = md5sum( line )
             if not tag or tag_found:
                 metric = parse_torque_accounting_log( line )
-                print metric
                 if metric:
                     try:
                         store.addMetric( metric )
