@@ -16,6 +16,7 @@ import glob
 import md5
 import os
 import re
+import shlex
 import signal
 import subprocess
 import socket
@@ -23,8 +24,8 @@ import sys
 import syslog
 import time
 import psutil
+import pymongo.errors
 from metric_store import MongoDBMetricStore, JMetric, NMetric
-
 
 # Constants
 TORQUE_PROC = "pbs_server"
@@ -43,48 +44,59 @@ LOG_LEVELS = {"error"   : syslog.LOG_ERR,
               "info"    : syslog.LOG_INFO,
               "debug"   : syslog.LOG_DEBUG,
              }
+CONF_FILE = "/etc/torque-metricd.conf"
 
+global tag_file
 global tag_new
-global acc_file_dir
+global acc_log
 
-config_defaults = {"acc_file_dir" : TORQUE_ACCOUNTING_PATH,
-                   "log_level"    : "warning",
-                   "mongodb_host" : "localhost",
-                   "include_cpus" : "False",
-                   "call_tagger"  : "False",
-                   "agg_cmd_port" : ""
+config_defaults = {"acc_file_dir"  : TORQUE_ACCOUNTING_PATH,
+                   "tag_file"      : TORQUE_ACCOUNTING_PATH + "/tag",
+                   "max_acc_files" : 7,
+                   "log_level"     : "warning",
+                   "mongodb_host"  : "localhost",
+                   "mongodb_uname" : "",
+                   "mongodb_pw"    : "",
+                   "include_cpus"  : "False",
+                   "call_tagger"   : "False",
+                   "agg_cmd_port"  : "tcp://127.0.0.1:5556"
                   }
 
 config = ConfigParser.RawConfigParser( config_defaults )
 config.add_section( "daemon" )
-config.read( "/etc/torque-metricd.conf" )
+config.read( CONF_FILE )
 log_level = config.get( "daemon", "log_level" )
 acc_file_dir = config.get( "daemon", "acc_file_dir" )
+tag_file = config.get( "daemon", "tag_file" )
+max_acc_files = config.getint( "daemon", "max_acc_files" )
 mongodb_host = config.get( "daemon", "mongodb_host" )
+mongodb_uname = config.get( "daemon", "mongodb_uname" )
+mongodb_pw = config.get( "daemon", "mongodb_pw" )
 include_cpus = config.getboolean( "daemon", "include_cpus" )
 call_tagger = config.getboolean( "daemon", "call_tagger" )
-agg_cmd_port = config.get( "daemon", "agg_cmd_port" )
+if call_tagger:
+    agg_cmd_port = config.get( "daemon", "agg_cmd_port" )
+    tagger_cmd = shlex.split( config.get("daemon", "tagger_cmd" ) )
 
 try:
     syslog_max_level = LOG_LEVELS[log_level.lower()]
 except:
     syslog_max_level = config_defaults["log_level"]
-    syslog.syslog( syslog.LOG_WARNING, "unknown log level '%s'! Defaults to 'warning'." % log_level )
+    syslog.syslog( syslog.LOG_WARNING, "unknown log level '%s'! Defaults to '%s'." % (log_level, config_defaults["log_level"]) )
 
 syslog.openlog( "torque-metricd", syslog.LOG_PID, syslog.LOG_DAEMON )
 syslog.setlogmask( syslog.LOG_UPTO( syslog_max_level ) ) 
 
-syslog.syslog( syslog.LOG_DEBUG, "starting torque-metricd" )
-for line in ["configuration:",
-             "    acc_file_dir = %(acc_file_dir)s",
-             "    mongodb_host = %(mongodb_host)s",
-             "    log_level = %(log_level)s"]:
+for line in ["config: acc_file_dir = %(acc_file_dir)s",
+             "config: tag_file = %(tag_file)s",
+             "config: mongodb_host = %(mongodb_host)s",
+             "config: log_level = %(log_level)s"]:
     syslog.syslog( syslog.LOG_INFO, line % locals() )
 
 def sig_handler( sig, frame ):
     if tag_new:
-        put_tag( acc_file_dir, tag_new )
-    syslog.syslog( syslog.LOG_INFO, "terminating due to SIGTERM..." )
+        put_tag( tag_file, tag_new, acc_log )
+    syslog.syslog( syslog.LOG_INFO, "terminating due to signal %d..." % sig)
     sys.exit( 0 )
 
 def md5sum( s ):
@@ -93,22 +105,21 @@ def md5sum( s ):
     return m.hexdigest()
 
 def pidof( name ):
-    procs = filter(lambda p: p.name == name, psutil.process_iter())
-    return [p.pid for p in procs]
+    return [p.pid for p in psutil.process_iter() if p.name() == name]
 
 def torque_pid():
     while True:
         pids = pidof( TORQUE_PROC )
-    if pids:
+        if pids:
             return pids[0]
         syslog.syslog( syslog.LOG_INFO, "waiting for Torque (%s) to start..." % TORQUE_PROC )
-        time.sleep( 30 )
+        time.sleep( 60 )
 
 def is_file_open( pid, file_name ):
     dir = os.path.join( "/proc", str( pid ), "fd" )
     if not os.path.exists( dir ):
         syslog.syslog( syslog.LOG_WARNING, "%s seems to have terminated!" % TORQUE_PROC )
-    return False
+        return False
     if not os.access( dir, os.R_OK | os.X_OK ):
         syslog.syslog( syslog.LOG_ERR, "no permissions to access: %s! Terminating..." % dir )
         sys.exit( 1 )
@@ -131,21 +142,21 @@ def tail( pid, file_name ):
     eof = False
     while is_file_open( pid, file_name ):
         while not eof:
-        # while not at EOF (indicated by readline returning "")
+            # while not at EOF (indicated by readline returning "")
             time.sleep( sleep )
             buf = buf + fd.readline()
             if buf == "":
-        eof = True
+                eof = True
                 if sleep < 1.0:
                     sleep += 0.001
-        continue
+                continue
             sleep = 0.001
-        # complete Torque lines always end with "\n"
-        if buf[-1] != "\n":#
-        eof = False
+            # complete Torque lines always end with "\n"
+            if buf[-1] != "\n":#
+                eof = False
                 continue
             line = buf
-        buf = ""
+            buf = ""
             yield line
         eof = False
     fd.close()
@@ -159,16 +170,18 @@ def parse_torque_accounting_log( line ):
     try:
         # example header: 08/08/2014 11:32:23;S;50438;<payload>
         comp = line.split( ";", 3 ) 
-        assert comp[1] in TORQUE_LOG_MARKER.keys(), "Torque accounting log (unknown event): '%s'" % comp[1]
-        timestamp = int( time.mktime( time.strptime( comp[0], "%m/%d/%Y %H:%M:%S" ) ) )    # log (not job) timestamp (time, T)
+        assert comp[1] in TORQUE_LOG_MARKER.keys(), "unknown event: '%s'" % comp[1]
+        timestamp = int( time.mktime( time.strptime( comp[0], "%m/%d/%Y %H:%M:%S" ) ) )     # log (not job) timestamp (time, T)
         value = TORQUE_LOG_MARKER[comp[1]]                                                  # event type (value, V)
         name = comp[2].replace( ".", "_" )                                                  # jobid (name, N)
         payload = comp[3]                                                                   # attribute set
         host_name = socket.gethostname()                                                    # add local hostname
         metric = JMetric( name=name, source="Torque", time=timestamp, host=host_name, value=value )
     except Exception as e:
-        syslog.syslog( syslog.LOG_WARNING, "Torque accounting log (parsing header failed): '%s'" % line )
+        syslog.syslog( syslog.LOG_WARNING, "parsing header (%s) failed: %s" % (str( e ), line[0:30]) )
         return None
+    if not payload:
+        return metric
     for attr_str in payload.split( " " ):
         # example payload: user=myuname group=sthaber jobname=STDIN queue=workq ctime=1407490338 qtime=1407490338 etime=1407490338 start=1407490343
         #     owner=myuname@sb-master exec_host=<exec_host> Resource_List.ncpus=1 Resource_List.neednodes=1:ppn=1:foo:ghz-2.6:mhz-2601:ddr1866:qlogic
@@ -177,7 +190,7 @@ def parse_torque_accounting_log( line ):
         try:
             k, v = attr_str.split( "=", 1 )
         except Exception as e:
-            syslog.syslog( syslog.LOG_WARNING, "Torque accounting log (failed to parse attributes): '%s'" % attr_str )
+            syslog.syslog( syslog.LOG_WARNING, "event (%s...), failed to parse attributes: '%s'" % (line[0:30], attr_str) )
             return None
         if k in ["ctime", "qtime", "etime", "start", "end"]:
             v = int( v )
@@ -200,42 +213,49 @@ def parse_torque_accounting_log( line ):
         metric[k] = v
     return metric
 
-def get_tag( dir ):
-    tag_file_name = dir + "/tag"
+def get_tag( tag_file ):
     tag = None
-    if os.path.isfile( tag_file_name ):
-        tag = open( tag_file_name ).read().split()[0]
-    if tag:
-            syslog.syslog( syslog.LOG_DEBUG, "tag file found: %s (%s)" % (tag_file_name, tag) )
+    log_file_name = None
+    if os.path.isfile( tag_file ):
+        try:
+            tag, log_file_name = open( tag_file ).read().split( " ", 2 )
+        except Exception as e:
+            syslog.syslog( syslog.LOG_DEBUG, "failed to read tag file (%s): %s" % (tag_file, str( e )) )
+        if tag and log_file_name:
+            syslog.syslog( syslog.LOG_DEBUG, "tag file (%s) found: %s %s" % (tag_file, tag, log_file_name) )
         else:
-        tag = None
-    return tag
+            tag = None
+            log_file_name = None
+    return tag, log_file_name
 
-def put_tag( dir, tag ):
-    tag_file_name = dir + "/tag"
-    open( tag_file_name, "w" ).write( tag )
-    syslog.syslog( syslog.LOG_DEBUG, "wrote: %s (%s)" % (tag_file_name, tag) )
+def put_tag( tag_file, tag, log_file_name ):
+    open( tag_file, "w" ).write( tag + " " + log_file_name )
+    syslog.syslog( syslog.LOG_DEBUG, "wrote tag (%s): %s %s" % (tag_file, tag, log_file_name) )
 
 try:
     store = None
     if mongodb_host:
-        store = MongoDBMetricStore( host_name=mongodb_host )
+        store = MongoDBMetricStore( host_name=mongodb_host, username=mongodb_uname, password=mongodb_pw )
     else:
-        syslog.syslog( syslog.LOG_WARNING, "can't connect to MongoDB! No host name set in configuration file." )
-except:
-    syslog.syslog( syslog.LOG_ERR, "can't connect to MongoDB! Check auth in mongodb.conf. Terminating..." )
+        syslog.syslog( syslog.LOG_WARNING, "can't connect to MongoDB! Set mongodb_host in '%s'." % CONf_FILE )
+except Exception as e:
+    syslog.syslog( syslog.LOG_ERR, "failed to connect to MongoDB (%s)! Terminating..." % str( e ) )
     sys.exit( 1 )
 
-signal.signal(signal.SIGINT, sig_handler)
+tag_new = None
+signal.signal(signal.SIGTERM, sig_handler)
 
 # import backlog
-tag = get_tag( acc_file_dir )
+tag, last_log = get_tag( tag_file )
 tag_found = False
-tag_new = None
 file_names = sorted( glob.glob( acc_file_dir + "/[0-9]*" ) )
-for file_name in file_names:
-    syslog.syslog( syslog.LOG_DEBUG, "importing metrics from: %s" % file_name )
+start = len( file_names ) - max_acc_files if max_acc_files >= 0 else 0
+for file_name in file_names[start:]:
     with open( file_name ) as f:
+        acc_log = os.path.basename( file_name )
+        if last_log and acc_log < last_log:
+            continue
+        syslog.syslog( syslog.LOG_DEBUG, "importing metrics from: %s" % file_name )
         for line in f:
             tag_new = md5sum( line )
             if not tag or tag_found:
@@ -244,15 +264,18 @@ for file_name in file_names:
                     try:
                         store.addMetric( metric )
                         syslog.syslog( syslog.LOG_DEBUG, "stored: %s" % str( metric ) )
+                    except pymongo.errors.DuplicateKeyError as e:
+                        syslog.syslog( syslog.LOG_INFO, "metric (%s, %s, %s) ignored, due to duplicate key." % (metric["host"], metric["name"], metric["value"]) )
                     except Exception as e:
-                        syslog.syslog( syslog.LOG_ERR, "failed to store metric: %s, %s" % (type( e ), str( e )) )
+                        syslog.syslog( syslog.LOG_ERR, "failed to store metric: %s" % str( type( e ) ) )
             else:
                 if tag_new == tag:
                     tag_found = True
 if tag_new:
-    put_tag( acc_file_dir, tag_new )
+    put_tag( tag_file, tag_new, acc_log )
+    tag_new = None
 if tag and not tag_found:
-    syslog.syslog( syslog.LOG_WARNING, "tag (%s) not found in any acc file (%s)!" % (tag, acc_file_dir) )
+    syslog.syslog( syslog.LOG_WARNING, "tag (%s) not found in any considered acc file (%s)!" % (tag, acc_file_dir) )
 
 # tail current accounting file
 while True:
@@ -265,6 +288,7 @@ while True:
     file_name = file_names[-1]
     syslog.syslog( syslog.LOG_INFO, "monitoring acc file: %s" % file_name )
     for line in tail( pid, file_name ):
+        acc_log = os.path.basename( file_name )   # placed here due to sudden SIGTERM
         tag_new = md5sum( line )
         metric = parse_torque_accounting_log( line )
         if metric:
@@ -272,26 +296,26 @@ while True:
                 store.addMetric( metric )
                 syslog.syslog( syslog.LOG_DEBUG, "saved: %s" % str( metric ) )
             except Exception as e:
-                syslog.syslog( syslog.LOG_ERR, "can't store metric: %s, %s" % (type( e ), str( e )) )
-            if isinstance( metric["cnodes"], dict ):
-                regex_str = "|".join( metric["cnodes"].keys() )
-            elif isinstance( metric["cnodes"], list ):
-                regex_str = "|".join( metric["cnodes"] )
-            else:
-                syslog.syslog( syslog.LOG_ERR, "internal error! Unknown metric.cnodes type(%s)." % type( metric["cmodes"] ))
+                syslog.syslog( syslog.LOG_ERR, "can't store metric: %s" % str( e ) )
+            if not call_tagger or "cnodes" not in metric:
                 continue
-            if call_tagger:
-                try:
-                    agg_cmd_args = ["python", "agg_cmd"]
-                    if agg_cmd_port:
-                        agg_cmd_args.extend( ["--cmd_port", agg_cmd_port] )
-                    if metric["value"] in ["rerun", "started", "restarted"]:
-                        agg_cmd_args.extend( ["--add", "J", metric["name"], "H", regex_str] )
-                        r = subprocess.call( agg_cmd_args )
-                    elif metric["value"] in ["aborted", "checkpointed", "deleted", "exited"]:
-                        agg_cmd_args.extend( ["--del", "J", metric["name"]] )
-                        r = subprocess.call( agg_cmd_args )
-                    if r != 0:
-                        syslog.syslog( syslog.LOG_ERR, "calling agg_cmd (%s) failed!" % " ".join( agg_cmd_args ) )
-                except:
-                    syslog.syslog( syslog.LOG_ERR, "failed to run agg_cmd!" )
+            if isinstance( metric["cnodes"], dict ):
+                regex_str = "\"^(" + "|".join( metric["cnodes"].keys() ) + ")$\""
+            elif isinstance( metric["cnodes"], list ):
+                regex_str = "\"^(" + "|".join( metric["cnodes"] ) + ")$\""
+            else:
+                syslog.syslog( syslog.LOG_ERR, "internal error! Unknown metric.cnodes type(%s)." % type( metric["cnodes"] ))
+                continue
+            try:
+                if agg_cmd_port:
+                    tagger_cmd[-1] = tagger_cmd[-1] + " --cmd_port %s" % agg_cmd_port
+                if metric["value"] in ["rerun", "started", "restarted"]:
+                    tagger_cmd[-1] = tagger_cmd[-1] + " --add J %s H %s" % (metric["name"], regex_str)
+                    r = subprocess.call( tagger_cmd )
+                elif metric["value"] in ["aborted", "checkpointed", "deleted", "exited"]:
+                    tagger_cmd[-1] = tagger_cmd[-1] + " --del J %s" % metric["name"]
+                    r = subprocess.call( tagger_cmd )
+                if r != 0:
+                    syslog.syslog( syslog.LOG_ERR, "calling tagger_cmd (%s) failed!" % " ".join( tagger_cmd ) )
+            except Exception as e:
+                syslog.syslog( syslog.LOG_ERR, "failed to run tagger_cmd: %s" % str( e ) )

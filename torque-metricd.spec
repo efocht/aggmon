@@ -1,6 +1,6 @@
 Summary: Service to retrieve Torque metrics
 Name: torque-metricd
-Version: 1.4
+Version: 1.5
 Release: 1%{?dist}
 BuildArch: noarch
 Group: System Environment/Base
@@ -22,9 +22,11 @@ This service retrieves Torque accounting data and stores them in MongoDB
 
 %install
 install -m 755 -d %{buildroot}%{_sbindir}
+install -m 755 -d %{buildroot}%{_sysconfdir}
 install -m 755 -d %{buildroot}%{upstartdir}
 install -m 755 -d %{buildroot}%{systemddir}
 install -m 755 torque-metricd %{buildroot}/%{_sbindir}
+install -m 640 torque-metricd.conf %{buildroot}/%{_sysconfdir}
 install -m 644 torque-metricd.upstart %{buildroot}%{upstartdir}/torque-metricd.conf
 install -m 644 torque-metricd-override.upstart %{buildroot}%{upstartdir}/torque-metricd.override
 install -m 644 torque-metricd.service %{buildroot}%{systemddir}/torque-metricd.service
@@ -35,11 +37,14 @@ rm -rf %{buildroot}
 %files
 %defattr(-, root, root)
 %{_sbindir}/*
+%{_sysconfdir}/*
 %{upstartdir}/*
 %{systemddir}/*
 
 
 %changelog
+* Tue Mar 04 2015 NEC EHPCTC AJ -> 1.5
+- improvements to cope with thousands of acc files
 * Fri Feb 27 2015 NEC EHPCTC AJ -> 1.4
 - added CPUs use by job to job metric (config: include_cpus)
 - added call of tagger (agg_cmd)
