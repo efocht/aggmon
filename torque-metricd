@@ -105,7 +105,11 @@ def md5sum( s ):
     return m.hexdigest()
 
 def pidof( name ):
-    return [p.pid for p in psutil.process_iter() if p.name() == name]
+    try:
+        return [p.pid for p in psutil.process_iter() if p.name() == name]
+    except:
+        # due to changes in psutil
+        return [p.pid for p in psutil.process_iter() if p.name == name]
 
 def torque_pid():
     while True:
@@ -244,6 +248,7 @@ except Exception as e:
 
 tag_new = None
 signal.signal(signal.SIGTERM, sig_handler)
+signal.signal(signal.SIGINT, sig_handler)
 
 # import backlog
 tag, last_log = get_tag( tag_file )
