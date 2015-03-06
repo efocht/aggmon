@@ -10,11 +10,13 @@ IFS=$'\x0a' L=(
 "Q;67412;queue=haswell"
 "Q;67415;queue=abudhabi"
 "S;67412;user=cbollmann group=cbollmann jobname=dailytest queue=haswell ctime=1425185041 qtime=1425185041 etime=1425185041 start=1425185042 owner=cbollmann@sb-master exec_host=hsw008/0+hsw008/1+hsw005/2 Resource_List.ncpus=1 Resource_List.neednodes=4:hsw:fdr:mem64gbdual:ppn=24 Resource_List.nodect=4 Resource_List.nodes=4:hsw:fdr:mem64gbdual:ppn=24 Resource_List.walltime=00:10:00"
+"E;67412;user=cbollmann group=cbollmann jobname=dailytest queue=haswell ctime=1425185041 qtime=1425185041 etime=1425185041 start=1425185042 owner=cbollmann@sb-master exec_host=hsw008/0+hsw008/1+hsw005/2 Resource_List.ncpus=1 Resource_List.neednodes=4:hsw:fdr:mem64gbdual:ppn=24 Resource_List.nodect=4 Resource_List.nodes=4:hsw:fdr:mem64gbdual:ppn=24 Resource_List.walltime=00:10:00"
 )
 
-for E in ${L[@]}; do
-	D="$(date "+%m/%d/%Y %H:%M:%S")"
-	echo "$D;$E" 1>&5
-	sleep 5
+for ((n=0; n<5; n++)); do
+	for E in ${L[@]}; do
+		D="$(date "+%m/%d/%Y %H:%M:%S")"
+		echo "$D;$E" 1>&5
+		sleep 5
+	done
 done
-

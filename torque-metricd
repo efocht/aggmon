@@ -59,7 +59,6 @@ config_defaults = {"acc_file_dir"  : TORQUE_ACCOUNTING_PATH,
                    "mongodb_pw"    : "",
                    "include_cpus"  : "False",
                    "call_tagger"   : "False",
-                   "agg_cmd_port"  : "tcp://127.0.0.1:5556"
                   }
 
 config = ConfigParser.RawConfigParser( config_defaults )
@@ -75,8 +74,8 @@ mongodb_pw = config.get( "daemon", "mongodb_pw" )
 include_cpus = config.getboolean( "daemon", "include_cpus" )
 call_tagger = config.getboolean( "daemon", "call_tagger" )
 if call_tagger:
-    agg_cmd_port = config.get( "daemon", "agg_cmd_port" )
-    tagger_cmd = shlex.split( config.get("daemon", "tagger_cmd" ) )
+    remote_cmd = shlex.split( config.get("daemon", "tagger_cmd" ) )
+    tagger_str = remote_cmd[-1]
 
 try:
     syslog_max_level = LOG_LEVELS[log_level.lower()]
@@ -302,25 +301,23 @@ while True:
                 syslog.syslog( syslog.LOG_DEBUG, "saved: %s" % str( metric ) )
             except Exception as e:
                 syslog.syslog( syslog.LOG_ERR, "can't store metric: %s" % str( e ) )
-            if not call_tagger or "cnodes" not in metric:
-                continue
-            if isinstance( metric["cnodes"], dict ):
-                regex_str = "\"^(" + "|".join( metric["cnodes"].keys() ) + ")$\""
-            elif isinstance( metric["cnodes"], list ):
-                regex_str = "\"^(" + "|".join( metric["cnodes"] ) + ")$\""
-            else:
-                syslog.syslog( syslog.LOG_ERR, "internal error! Unknown metric.cnodes type(%s)." % type( metric["cnodes"] ))
+            if not call_tagger:
                 continue
             try:
-                if agg_cmd_port:
-                    tagger_cmd[-1] = tagger_cmd[-1] + " --cmd_port %s" % agg_cmd_port
-                if metric["value"] in ["rerun", "started", "restarted"]:
-                    tagger_cmd[-1] = tagger_cmd[-1] + " --add J %s H %s" % (metric["name"], regex_str)
-                    r = subprocess.call( tagger_cmd )
+                if metric["value"] in ["started", "restarted"]:
+                    # "rerun" is not considered here since it is followed by a "started" event 
+                    if isinstance( metric["cnodes"], dict ):
+                        regex_str = "^(" + "|".join( metric["cnodes"].keys() ) + ")$"
+                    elif isinstance( metric["cnodes"], list ):
+                        regex_str = "^(" + "|".join( metric["cnodes"] ) + ")$"
+                    tagger_cmd = tagger_str + " --add J %s H \"%s\"" % (metric["name"], regex_str)
                 elif metric["value"] in ["aborted", "checkpointed", "deleted", "exited"]:
-                    tagger_cmd[-1] = tagger_cmd[-1] + " --del J %s" % metric["name"]
-                    r = subprocess.call( tagger_cmd )
+                    tagger_cmd = tagger_str + " --del J %s" % metric["name"]
+                else:
+                    continue
+                remote_cmd[-1] = tagger_cmd
+                r = subprocess.call( remote_cmd )
                 if r != 0:
-                    syslog.syslog( syslog.LOG_ERR, "calling tagger_cmd (%s) failed!" % " ".join( tagger_cmd ) )
+                    syslog.syslog( syslog.LOG_ERR, "calling tagger_cmd (%s) failed!" % " ".join( remote_cmd ) )
             except Exception as e:
                 syslog.syslog( syslog.LOG_ERR, "failed to run tagger_cmd: %s" % str( e ) )
