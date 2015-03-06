@@ -1,6 +1,6 @@
 Summary: Service to retrieve Torque metrics
 Name: torque-metricd
-Version: 1.5
+Version: 1.6
 Release: 1%{?dist}
 BuildArch: noarch
 Group: System Environment/Base
@@ -43,6 +43,8 @@ rm -rf %{buildroot}
 
 
 %changelog
+* Fri Mar 06 2015 NEC EHPCTC AJ -> 1.6
+- Fixed some problems with remote tagger invocation.
 * Tue Mar 04 2015 NEC EHPCTC AJ -> 1.5
 - improvements to cope with thousands of acc files
 * Fri Feb 27 2015 NEC EHPCTC AJ -> 1.4
