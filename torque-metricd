@@ -24,7 +24,6 @@ import sys
 import syslog
 import time
 import psutil
-import pymongo.errors
 from metric_store import MongoDBMetricStore, JMetric, NMetric
 
 # Constants
@@ -268,8 +267,6 @@ for file_name in file_names[start:]:
                     try:
                         store.addMetric( metric )
                         syslog.syslog( syslog.LOG_DEBUG, "stored: %s" % str( metric ) )
-                    except pymongo.errors.DuplicateKeyError as e:
-                        syslog.syslog( syslog.LOG_INFO, "metric (%s, %s, %s) ignored, due to duplicate key." % (metric["host"], metric["name"], metric["value"]) )
                     except Exception as e:
                         syslog.syslog( syslog.LOG_ERR, "failed to store metric: %s" % str( type( e ) ) )
             else:

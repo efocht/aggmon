@@ -2,9 +2,9 @@
 #
 # This service retrieves Torque accounting data and stores them in MongoDB
 
-start on started mongod
-stop on stopping mongod
-respawn
+#start on started mongod
+#stop on stopping mongod
+#respawn
 
 exec /usr/sbin/torque-metricd
 
