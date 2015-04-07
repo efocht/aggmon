@@ -1,6 +1,6 @@
 Summary: Service to retrieve Torque metrics
 Name: torque-metricd
-Version: 1.7
+Version: 1.8
 Release: 1%{?dist}
 BuildArch: noarch
 Group: System
