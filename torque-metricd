@@ -304,7 +304,7 @@ while True:
                 if metric["value"] in ["started", "restarted"]:
                     # "rerun" is not considered here since it is followed by a "started" event 
                     if isinstance( metric["cnodes"], dict ):
-                        regex_str = "^(" + "|".join( metric["cnodes"].keys() ) + ")$"
+                        regex_str = "RE:^(" + "|".join( metric["cnodes"].keys() ) + ")$"
                     elif isinstance( metric["cnodes"], list ):
                         regex_str = "^(" + "|".join( metric["cnodes"] ) + ")$"
                     tagger_cmd = tagger_str + " --add J %s H \"%s\"" % (metric["name"], regex_str)
