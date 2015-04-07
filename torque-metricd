@@ -60,36 +60,6 @@ config_defaults = {"acc_file_dir"  : TORQUE_ACCOUNTING_PATH,
                    "call_tagger"   : "False",
                   }
 
-config = ConfigParser.RawConfigParser( config_defaults )
-config.add_section( "daemon" )
-config.read( CONF_FILE )
-log_level = config.get( "daemon", "log_level" )
-acc_file_dir = config.get( "daemon", "acc_file_dir" )
-tag_file = config.get( "daemon", "tag_file" )
-max_acc_files = config.getint( "daemon", "max_acc_files" )
-mongodb_host = config.get( "daemon", "mongodb_host" )
-mongodb_uname = config.get( "daemon", "mongodb_uname" )
-mongodb_pw = config.get( "daemon", "mongodb_pw" )
-include_cpus = config.getboolean( "daemon", "include_cpus" )
-call_tagger = config.getboolean( "daemon", "call_tagger" )
-if call_tagger:
-    remote_cmd = shlex.split( config.get("daemon", "tagger_cmd" ) )
-    tagger_str = remote_cmd[-1]
-
-try:
-    syslog_max_level = LOG_LEVELS[log_level.lower()]
-except:
-    syslog_max_level = config_defaults["log_level"]
-    syslog.syslog( syslog.LOG_WARNING, "unknown log level '%s'! Defaults to '%s'." % (log_level, config_defaults["log_level"]) )
-
-syslog.openlog( "torque-metricd", syslog.LOG_PID, syslog.LOG_DAEMON )
-syslog.setlogmask( syslog.LOG_UPTO( syslog_max_level ) ) 
-
-for line in ["config: acc_file_dir = %(acc_file_dir)s",
-             "config: tag_file = %(tag_file)s",
-             "config: mongodb_host = %(mongodb_host)s",
-             "config: log_level = %(log_level)s"]:
-    syslog.syslog( syslog.LOG_INFO, line % locals() )
 
 def sig_handler( sig, frame ):
     if tag_new:
@@ -234,6 +204,44 @@ def put_tag( tag_file, tag, log_file_name ):
     open( tag_file, "w" ).write( tag + " " + log_file_name )
     syslog.syslog( syslog.LOG_DEBUG, "wrote tag (%s): %s %s" % (tag_file, tag, log_file_name) )
 
+
+
+#
+# Main
+#
+
+
+config = ConfigParser.RawConfigParser( config_defaults )
+config.add_section( "daemon" )
+config.read( CONF_FILE )
+log_level = config.get( "daemon", "log_level" )
+acc_file_dir = config.get( "daemon", "acc_file_dir" )
+tag_file = config.get( "daemon", "tag_file" )
+max_acc_files = config.getint( "daemon", "max_acc_files" )
+mongodb_host = config.get( "daemon", "mongodb_host" )
+mongodb_uname = config.get( "daemon", "mongodb_uname" )
+mongodb_pw = config.get( "daemon", "mongodb_pw" )
+include_cpus = config.getboolean( "daemon", "include_cpus" )
+call_tagger = config.getboolean( "daemon", "call_tagger" )
+if call_tagger:
+    remote_cmd = shlex.split( config.get("daemon", "tagger_cmd" ) )
+    tagger_str = remote_cmd[-1]
+
+try:
+    syslog_max_level = LOG_LEVELS[log_level.lower()]
+except:
+    syslog_max_level = config_defaults["log_level"]
+    syslog.syslog( syslog.LOG_WARNING, "unknown log level '%s'! Defaults to '%s'." % (log_level, config_defaults["log_level"]) )
+
+syslog.openlog( "torque-metricd", syslog.LOG_PID, syslog.LOG_DAEMON )
+syslog.setlogmask( syslog.LOG_UPTO( syslog_max_level ) ) 
+
+for line in ["config: acc_file_dir = %(acc_file_dir)s",
+             "config: tag_file = %(tag_file)s",
+             "config: mongodb_host = %(mongodb_host)s",
+             "config: log_level = %(log_level)s"]:
+    syslog.syslog( syslog.LOG_INFO, line % locals() )
+
 try:
     store = None
     if mongodb_host:
@@ -302,11 +310,16 @@ while True:
                 continue
             try:
                 if metric["value"] in ["started", "restarted"]:
-                    # "rerun" is not considered here since it is followed by a "started" event 
+                    # "rerun" is not considered here since it is followed by a "started" event
+                    nodelist = []
                     if isinstance( metric["cnodes"], dict ):
-                        regex_str = "RE:^(" + "|".join( metric["cnodes"].keys() ) + ")$"
+                        nodelist = metric["cnodes"].keys()
                     elif isinstance( metric["cnodes"], list ):
-                        regex_str = "^(" + "|".join( metric["cnodes"] ) + ")$"
+                        nodelist = metric["cnodes"]
+                    if len(nodelist) == 1:
+                        regex_str = nodelist[0]
+                    else:
+                        regex_str = "RE:^(" + "|".join( nodelist ) + ")$"
                     tagger_cmd = tagger_str + " --add J %s H \"%s\"" % (metric["name"], regex_str)
                 elif metric["value"] in ["aborted", "checkpointed", "deleted", "exited"]:
                     tagger_cmd = tagger_str + " --del J %s" % metric["name"]
