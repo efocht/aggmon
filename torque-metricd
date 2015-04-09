@@ -200,6 +200,7 @@ def get_tag( tag_file ):
             log_file_name = None
     return tag, log_file_name
 
+
 def put_tag( tag_file, tag, log_file_name ):
     open( tag_file, "w" ).write( tag + " " + log_file_name )
     syslog.syslog( syslog.LOG_DEBUG, "wrote tag (%s): %s %s" % (tag_file, tag, log_file_name) )
@@ -210,7 +211,11 @@ def put_tag( tag_file, tag, log_file_name ):
 # Main
 #
 
-
+#
+# TODO: reading the configuration could/should be a separate function.
+#       Pass around a dict with the read in config variables, for example,
+#       instead of the single variables.
+#
 config = ConfigParser.RawConfigParser( config_defaults )
 config.add_section( "daemon" )
 config.read( CONF_FILE )
@@ -227,6 +232,13 @@ if call_tagger:
     remote_cmd = shlex.split( config.get("daemon", "tagger_cmd" ) )
     tagger_str = remote_cmd[-1]
 
+
+
+#
+# REMARK: syslog could be hidden behind logging, we did this in LxDaemon.
+# That way we can start with syslog output or with normal logging output
+# when developing, debugging and/or running in foreground.
+#
 try:
     syslog_max_level = LOG_LEVELS[log_level.lower()]
 except:
@@ -242,6 +254,9 @@ for line in ["config: acc_file_dir = %(acc_file_dir)s",
              "config: log_level = %(log_level)s"]:
     syslog.syslog( syslog.LOG_INFO, line % locals() )
 
+#
+# TODO: connecting to the DB should be a separate function or class init method
+#
 try:
     store = None
     if mongodb_host:
@@ -252,9 +267,15 @@ except Exception as e:
     syslog.syslog( syslog.LOG_ERR, "failed to connect to MongoDB (%s)! Terminating..." % str( e ) )
     sys.exit( 1 )
 
-tag_new = None
 signal.signal(signal.SIGTERM, sig_handler)
 signal.signal(signal.SIGINT, sig_handler)
+
+
+
+#
+# TODO: Importing the backlog should be a separate function or class method
+#
+tag_new = None
 
 # import backlog
 tag, last_log = get_tag( tag_file )
@@ -286,6 +307,8 @@ if tag_new:
 if tag and not tag_found:
     syslog.syslog( syslog.LOG_WARNING, "tag (%s) not found in any considered acc file (%s)!" % (tag, acc_file_dir) )
 
+
+
 # tail current accounting file
 while True:
     pid = torque_pid()
@@ -308,6 +331,11 @@ while True:
                 syslog.syslog( syslog.LOG_ERR, "can't store metric: %s" % str( e ) )
             if not call_tagger:
                 continue
+
+            #
+            # TODO: adding and removing a aggmon tag should be a separate function or method!
+            #
+            
             try:
                 if metric["value"] in ["started", "restarted"]:
                     # "rerun" is not considered here since it is followed by a "started" event
