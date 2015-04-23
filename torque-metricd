@@ -21,10 +21,104 @@ import signal
 import subprocess
 import socket
 import sys
-import syslog
+import logging
+import logging.handlers
 import time
 import psutil
-from metric_store import MongoDBMetricStore, JMetric, NMetric
+import copy
+from metric_store import MongoDBMetricStore, MongoDBJobList, JMetric, NMetric
+import cmd
+
+"""
+This script mainly parses the PBS Torque accounting events and puts these
+events as metrics into a database (MongoDB).
+Past events are retrieved from PBS Torque log files (backlog). After these
+files are read the script behaves similar to a "tail -f" command and watches
+for new events in the current log file.
+In addition to storing metrics in a database there are some other tasks (JobTask)
+that are executed on job start and stop events.
+"""
+
+class JobTask:
+    """ Interface definition for tasks to be executed on job start and stop events """
+    def addJob( self, metric ):
+        """ This method is called if an job "started" or "restarted" event is received """
+        raise NotImplementedException()
+
+    def removeJob( self, name ):
+        """ This method is called if an job "aborted", "checkpointed", "deleted" and "exited" event is received """
+        raise NotImplementedException()
+
+class JobCache(JobTask):
+    """ Temporary storage (memory) for Jobs with unique JobID (name) """
+    def __init__( self ):
+        self.__cache = {}
+
+    def addJob( self, metric ):
+        self.__cache[metric["name"]] = copy.deepcopy( metric )
+
+    def removeJob( self, name ):
+        try:
+            del self.__cache[name]
+        except:
+            pass
+
+    def getList( self ):
+        return self.__cache.values()
+
+class JobList(JobTask):
+    """ Permanent storage (MongoDB) for Jobs with unique JobID (name) """
+    def __init__( self, conf ):
+        self.__joblist = MongoDBJobList( host_name=conf["mongodb_host"], username=conf["mongodb_uname"], password=conf["mongodb_pw"] )
+        self.__call_tagger = conf["call_tagger"]
+
+    def addJob( self, metric ):
+        if self.__call_tagger:
+            self.__joblist.addJob( metric )
+
+    def removeJob( self, name ):
+        if self.__call_tagger:
+            self.__joblist.removeJob( name )
+
+    def getList( self ):
+        return self.__joblist.getList()
+
+class Tagger(JobTask):
+    """ Execute an external program (tagger) that adds Job information to metrics """
+    def __init__(self, conf ):
+        self.__cmd = conf["tagger_cmd"]
+        self.__call_tagger = conf["call_tagger"]
+        tagger_cmd = self.__cmd + " --reset"
+        self.__invoke(tagger_cmd )
+        
+    def addJob( self, metric ):
+        if not self.__call_tagger:
+            return
+        nodelist = []
+        if isinstance( metric["cnodes"], dict ):
+            nodelist = metric["cnodes"].keys()
+        elif isinstance( metric["cnodes"], list ):
+            nodelist = metric["cnodes"]
+        if len(nodelist) == 1:
+            regex_str = nodelist[0]
+        else:
+            regex_str = "RE:^(" + "|".join( nodelist ) + ")$"
+        tagger_cmd = self.__cmd + " --add J %s H \"%s\"" % (metric["name"], regex_str)
+        self.__invoke(tagger_cmd )
+
+    def removeJob( self, name ):
+        if not self.__call_tagger:
+            return
+        del self.__cache[name]
+        tagger_cmd = self.__cmd + " --del J %s" % metric["name"]
+        self.__invoke(tagger_cmd )
+
+    @staticmethod
+    def __invoke( cmd ):
+        r = subprocess.call( shlex.split( cmd ) )
+        if r != 0:
+            log.warn( "calling tagger (%s) failed!" % cmd )
+        
 
 # Constants
 TORQUE_PROC = "pbs_server"
@@ -38,10 +132,10 @@ TORQUE_LOG_MARKER = {"A" : "aborted",         # job has been aborted by server
                      "S" : "started",         # an attempt to start the job has been made
                      "T" : "restarted",       # an attempt to restart the job has been made (after checkpointed)
                     }
-LOG_LEVELS = {"error"   : syslog.LOG_ERR,
-              "warning" : syslog.LOG_WARNING,
-              "info"    : syslog.LOG_INFO,
-              "debug"   : syslog.LOG_DEBUG,
+LOG_LEVELS = {"error"   : logging.ERROR,
+              "warning" : logging.WARNING,
+              "info"    : logging.INFO,
+              "debug"   : logging.DEBUG,
              }
 CONF_FILE = "/etc/torque-metricd.conf"
 
@@ -49,10 +143,11 @@ global tag_file
 global tag_new
 global acc_log
 
-config_defaults = {"acc_file_dir"  : TORQUE_ACCOUNTING_PATH,
+CONFIG_DEFAULTS = {"acc_file_dir"  : TORQUE_ACCOUNTING_PATH,
                    "tag_file"      : TORQUE_ACCOUNTING_PATH + "/tag",
                    "max_acc_files" : 7,
                    "log_level"     : "warning",
+                   "to_syslog"     : "False",
                    "mongodb_host"  : "localhost",
                    "mongodb_uname" : "",
                    "mongodb_pw"    : "",
@@ -64,7 +159,7 @@ config_defaults = {"acc_file_dir"  : TORQUE_ACCOUNTING_PATH,
 def sig_handler( sig, frame ):
     if tag_new:
         put_tag( tag_file, tag_new, acc_log )
-    syslog.syslog( syslog.LOG_INFO, "terminating due to signal %d..." % sig)
+    log.info( "terminating due to signal %d..." % sig)
     sys.exit( 0 )
 
 def md5sum( s ):
@@ -84,16 +179,16 @@ def torque_pid():
         pids = pidof( TORQUE_PROC )
         if pids:
             return pids[0]
-        syslog.syslog( syslog.LOG_INFO, "waiting for Torque (%s) to start..." % TORQUE_PROC )
+        log.info( "waiting for Torque (%s) to start..." % TORQUE_PROC )
         time.sleep( 60 )
 
 def is_file_open( pid, file_name ):
     dir = os.path.join( "/proc", str( pid ), "fd" )
     if not os.path.exists( dir ):
-        syslog.syslog( syslog.LOG_WARNING, "%s seems to have terminated!" % TORQUE_PROC )
+        log.warn( "%s seems to have terminated!" % TORQUE_PROC )
         return False
     if not os.access( dir, os.R_OK | os.X_OK ):
-        syslog.syslog( syslog.LOG_ERR, "no permissions to access: %s! Terminating..." % dir )
+        log.error( "no permissions to access: %s! Terminating..." % dir )
         sys.exit( 1 )
     for fds in os.listdir( dir ):
         for fd in fds:
@@ -137,7 +232,7 @@ def parse_torque_accounting_log( line ):
     import time
     line = line.strip()
     if not line:
-        syslog.syslog( syslog.LOG_WARNING, "ignoring empty line" )
+        log.warn( "ignoring empty line" )
         return None
     try:
         # example header: 08/08/2014 11:32:23;S;50438;<payload>
@@ -150,7 +245,7 @@ def parse_torque_accounting_log( line ):
         host_name = socket.gethostname()                                                    # add local hostname
         metric = JMetric( name=name, source="Torque", time=timestamp, host=host_name, value=value )
     except Exception as e:
-        syslog.syslog( syslog.LOG_WARNING, "parsing header (%s) failed: %s" % (str( e ), line[0:30]) )
+        log.warn( "parsing header (%s) failed: %s" % (str( e ), line[0:30]) )
         return None
     if not payload:
         return metric
@@ -162,7 +257,7 @@ def parse_torque_accounting_log( line ):
         try:
             k, v = attr_str.split( "=", 1 )
         except Exception as e:
-            syslog.syslog( syslog.LOG_WARNING, "event (%s...), failed to parse attributes: '%s'" % (line[0:30], attr_str) )
+            log.warn( "event (%s...), failed to parse attributes: '%s'" % (line[0:30], attr_str) )
             return None
         if k in ["ctime", "qtime", "etime", "start", "end"]:
             v = int( v )
@@ -173,7 +268,7 @@ def parse_torque_accounting_log( line ):
             # example exec_host: sabi36/19+sabi36/18+sabi36/17+sabi36/16+sabi36/15+sabi36/14+sabi36/13+sabi36/12+sabi36/11...
             nodes = sorted( list( set( [r.split( "/" )[0] for r in v.split( "+" )] ) ) )
             k = "cnodes"
-            if include_cpus:
+            if conf["include_cpus"]:
                 cpus = {}
                 for n in nodes:
                     cpus[n] = sorted( list( set( [int( r.split( "/", 2 )[1] ) for r in v.split( "+" ) if r.split( "/", 2 )[0] == n] ) ) )
@@ -192,102 +287,101 @@ def get_tag( tag_file ):
         try:
             tag, log_file_name = open( tag_file ).read().split( " ", 2 )
         except Exception as e:
-            syslog.syslog( syslog.LOG_DEBUG, "failed to read tag file (%s): %s" % (tag_file, str( e )) )
+            log.debug( "failed to read tag file (%s): %s" % (tag_file, str( e )) )
         if tag and log_file_name:
-            syslog.syslog( syslog.LOG_DEBUG, "tag file (%s) found: %s %s" % (tag_file, tag, log_file_name) )
+            log.debug( "tag file (%s) found: %s %s" % (tag_file, tag, log_file_name) )
         else:
             tag = None
             log_file_name = None
     return tag, log_file_name
 
-
 def put_tag( tag_file, tag, log_file_name ):
     open( tag_file, "w" ).write( tag + " " + log_file_name )
-    syslog.syslog( syslog.LOG_DEBUG, "wrote tag (%s): %s %s" % (tag_file, tag, log_file_name) )
+    log.debug( "wrote tag (%s): %s %s" % (tag_file, tag, log_file_name) )
 
-
-
-#
-# Main
-#
-
-#
-# TODO: reading the configuration could/should be a separate function.
-#       Pass around a dict with the read in config variables, for example,
-#       instead of the single variables.
-#
-config = ConfigParser.RawConfigParser( config_defaults )
-config.add_section( "daemon" )
-config.read( CONF_FILE )
-log_level = config.get( "daemon", "log_level" )
-acc_file_dir = config.get( "daemon", "acc_file_dir" )
-tag_file = config.get( "daemon", "tag_file" )
-max_acc_files = config.getint( "daemon", "max_acc_files" )
-mongodb_host = config.get( "daemon", "mongodb_host" )
-mongodb_uname = config.get( "daemon", "mongodb_uname" )
-mongodb_pw = config.get( "daemon", "mongodb_pw" )
-include_cpus = config.getboolean( "daemon", "include_cpus" )
-call_tagger = config.getboolean( "daemon", "call_tagger" )
-if call_tagger:
-    remote_cmd = shlex.split( config.get("daemon", "tagger_cmd" ) )
-    tagger_str = remote_cmd[-1]
-
-
-
-#
-# REMARK: syslog could be hidden behind logging, we did this in LxDaemon.
-# That way we can start with syslog output or with normal logging output
-# when developing, debugging and/or running in foreground.
-#
-try:
-    syslog_max_level = LOG_LEVELS[log_level.lower()]
-except:
-    syslog_max_level = config_defaults["log_level"]
-    syslog.syslog( syslog.LOG_WARNING, "unknown log level '%s'! Defaults to '%s'." % (log_level, config_defaults["log_level"]) )
-
-syslog.openlog( "torque-metricd", syslog.LOG_PID, syslog.LOG_DAEMON )
-syslog.setlogmask( syslog.LOG_UPTO( syslog_max_level ) ) 
-
-for line in ["config: acc_file_dir = %(acc_file_dir)s",
-             "config: tag_file = %(tag_file)s",
-             "config: mongodb_host = %(mongodb_host)s",
-             "config: log_level = %(log_level)s"]:
-    syslog.syslog( syslog.LOG_INFO, line % locals() )
-
-#
-# TODO: connecting to the DB should be a separate function or class init method
-#
-try:
-    store = None
-    if mongodb_host:
-        store = MongoDBMetricStore( host_name=mongodb_host, username=mongodb_uname, password=mongodb_pw )
+def update_job_tasks( metric , objs ):
+    if metric["value"] in ["started", "restarted"]:
+        # "rerun" is not considered here since it is followed by a "started" event
+        for obj in objs:
+            try:
+                obj.addJob( metric )
+            except Exception as e:
+                log.error( "Failed to add job metric to %s: %s" % ( str( type( obj ) ), str( e )) )
+    elif metric["value"] in ["aborted", "checkpointed", "deleted", "exited"]:
+        for obj in objs:
+            try:
+                obj.removeJob( metric["name"] )
+            except Exception as e:
+                log.error( "Failed to remove job metric of %s: %s" % ( str( type( obj ) ), str( e )) )
     else:
-        syslog.syslog( syslog.LOG_WARNING, "can't connect to MongoDB! Set mongodb_host in '%s'." % CONf_FILE )
-except Exception as e:
-    syslog.syslog( syslog.LOG_ERR, "failed to connect to MongoDB (%s)! Terminating..." % str( e ) )
-    sys.exit( 1 )
+        return    
 
+def read_config():
+    conf = {}
+    config = ConfigParser.RawConfigParser( CONFIG_DEFAULTS )
+    config.add_section( "daemon" )
+    config.read( CONF_FILE )
+    conf["log_level"] = config.get( "daemon", "log_level" )
+    conf["to_syslog"] = config.getboolean( "daemon", "to_syslog" )
+    conf["acc_file_dir"] = config.get( "daemon", "acc_file_dir" )
+    conf["tag_file"] = config.get( "daemon", "tag_file" )
+    conf["max_acc_files"] = config.getint( "daemon", "max_acc_files" )
+    conf["mongodb_host"] = config.get( "daemon", "mongodb_host" )
+    conf["mongodb_uname"] = config.get( "daemon", "mongodb_uname" )
+    conf["mongodb_pw"] = config.get( "daemon", "mongodb_pw" )
+    conf["include_cpus"] = config.getboolean( "daemon", "include_cpus" )
+    conf["call_tagger"] = config.getboolean( "daemon", "call_tagger" )
+    conf["tagger_cmd"] = config.get("daemon", "tagger_cmd" )
+    return conf
+
+def connect_metric_store( conf ):
+    try:
+        store = MongoDBMetricStore( host_name=conf["mongodb_host"], username=conf["mongodb_uname"], password=conf["mongodb_pw"] )
+    except Exception as e:
+        log.error( "failed to connect to MongoDB (%s)! Terminating..." % str( e ) )
+        sys.exit( 1 )
+    return store
+
+# main
+conf = read_config()
+
+# set logging up
+try:
+    log = logging.getLogger( __name__ )
+    log_level = LOG_LEVELS[conf["log_level"].lower()]
+except:
+    log_level = config_defaults["log_level"]
+    log.warn( "unknown log level '%s'! Defaults to '%s'." % (log_level, config_defaults["log_level"]) )
+log.setLevel( log_level )
+if conf["to_syslog"]:
+    handler = logging.handlers.SysLogHandler( address="/dev/log" )
+else:
+    handler = logging.StreamHandler()
+log.addHandler( handler )
+for k, v in conf.items():
+    log.debug( "conf: %s = %s" % (k, str( v )) )
+tag_file = conf["tag_file"]
+
+# open database connection
+store = connect_metric_store( conf )
+
+# set signal handling up
+tag_new = None
 signal.signal(signal.SIGTERM, sig_handler)
 signal.signal(signal.SIGINT, sig_handler)
 
-
-
-#
-# TODO: Importing the backlog should be a separate function or class method
-#
-tag_new = None
-
-# import backlog
+# import backlog, add all job events to metric store, create cache of currently running jobs
+cache = JobCache()
 tag, last_log = get_tag( tag_file )
 tag_found = False
-file_names = sorted( glob.glob( acc_file_dir + "/[0-9]*" ) )
-start = len( file_names ) - max_acc_files if max_acc_files >= 0 else 0
+file_names = sorted( glob.glob( conf["acc_file_dir"] + "/[0-9]*" ) )
+start = len( file_names ) - conf["max_acc_files"] if conf["max_acc_files"] >= 0 else 0
 for file_name in file_names[start:]:
     with open( file_name ) as f:
         acc_log = os.path.basename( file_name )
         if last_log and acc_log < last_log:
             continue
-        syslog.syslog( syslog.LOG_DEBUG, "importing metrics from: %s" % file_name )
+        log.debug( "importing metrics from: %s" % file_name )
         for line in f:
             tag_new = md5sum( line )
             if not tag or tag_found:
@@ -295,9 +389,10 @@ for file_name in file_names[start:]:
                 if metric:
                     try:
                         store.addMetric( metric )
-                        syslog.syslog( syslog.LOG_DEBUG, "stored: %s" % str( metric ) )
+                        log.debug( "stored: %s" % str( metric ) )
                     except Exception as e:
-                        syslog.syslog( syslog.LOG_ERR, "failed to store metric: %s" % str( type( e ) ) )
+                        log.error( "failed to ihandle backlog metric: %s" % str( type( e ) ) )
+                    update_job_tasks( metric, [cache] )
             else:
                 if tag_new == tag:
                     tag_found = True
@@ -305,20 +400,26 @@ if tag_new:
     put_tag( tag_file, tag_new, acc_log )
     tag_new = None
 if tag and not tag_found:
-    syslog.syslog( syslog.LOG_WARNING, "tag (%s) not found in any considered acc file (%s)!" % (tag, acc_file_dir) )
+    log.warn( "tag (%s) not found in any considered acc file (%s)!" % (tag, conf["acc_file_dir"]) )
 
-
+# push cache that contains currently running jobs collected from backlog to tagger and mongodb's joblist collection
+joblist = JobList( conf )
+tagger = Tagger( conf )
+for metric in cache.getList():
+    log.debug( "running job from backlog: %s" % str( metric ))
+    update_job_tasks( metric, [tagger, joblist] )
+del cache
 
 # tail current accounting file
 while True:
     pid = torque_pid()
-    file_names = sorted( glob.glob( acc_file_dir + "/[0-9]*" ) )
+    file_names = sorted( glob.glob( conf["acc_file_dir"] + "/[0-9]*" ) )
     if not file_names:
-        syslog.syslog( syslog.LOG_WARNING, "no accounting file found in %s, waiting..." % acc_file_dir )
+        log.warn( "no accounting file found in %s, waiting..." % conf["acc_file_dir"] )
         time.sleep( 30 )
         continue
     file_name = file_names[-1]
-    syslog.syslog( syslog.LOG_INFO, "monitoring acc file: %s" % file_name )
+    log.info( "monitoring acc file: %s" % file_name )
     for line in tail( pid, file_name ):
         acc_log = os.path.basename( file_name )   # placed here due to sudden SIGTERM
         tag_new = md5sum( line )
@@ -326,36 +427,7 @@ while True:
         if metric:
             try:
                 store.addMetric( metric )
-                syslog.syslog( syslog.LOG_DEBUG, "saved: %s" % str( metric ) )
+                log.debug( "saved: %s" % str( metric ) )
             except Exception as e:
-                syslog.syslog( syslog.LOG_ERR, "can't store metric: %s" % str( e ) )
-            if not call_tagger:
-                continue
-
-            #
-            # TODO: adding and removing a aggmon tag should be a separate function or method!
-            #
-            
-            try:
-                if metric["value"] in ["started", "restarted"]:
-                    # "rerun" is not considered here since it is followed by a "started" event
-                    nodelist = []
-                    if isinstance( metric["cnodes"], dict ):
-                        nodelist = metric["cnodes"].keys()
-                    elif isinstance( metric["cnodes"], list ):
-                        nodelist = metric["cnodes"]
-                    if len(nodelist) == 1:
-                        regex_str = nodelist[0]
-                    else:
-                        regex_str = "RE:^(" + "|".join( nodelist ) + ")$"
-                    tagger_cmd = tagger_str + " --add J %s H \"%s\"" % (metric["name"], regex_str)
-                elif metric["value"] in ["aborted", "checkpointed", "deleted", "exited"]:
-                    tagger_cmd = tagger_str + " --del J %s" % metric["name"]
-                else:
-                    continue
-                remote_cmd[-1] = tagger_cmd
-                r = subprocess.call( remote_cmd )
-                if r != 0:
-                    syslog.syslog( syslog.LOG_ERR, "calling tagger_cmd (%s) failed!" % " ".join( remote_cmd ) )
-            except Exception as e:
-                syslog.syslog( syslog.LOG_ERR, "failed to run tagger_cmd: %s" % str( e ) )
+                log.error( "failed to handle metric: %s" % str( e ) )
+            update_job_tasks( metric, [tagger, joblist] )

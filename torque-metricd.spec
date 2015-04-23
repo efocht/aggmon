@@ -1,6 +1,6 @@
 Summary: Service to retrieve Torque metrics
 Name: torque-metricd
-Version: 1.8
+Version: 1.9
 Release: 1%{?dist}
 BuildArch: noarch
 Group: System
@@ -45,6 +45,10 @@ rm -rf %{buildroot}
 /bin/rm -f %{upstartdir}/%{name}.override
 
 %changelog
+* Thu Apr 07 2015 NEC EHPCTC AJ -> 1.9
+- Added list of running jobs in database
+* Tue Apr 07 2015 NEC EHPCTC EF -> 1.8
+- Bumped version
 * Mon Mar 09 2015 NEC EHPCTC AJ -> 1.7
 - workaround for upstart problem with *.override files
 * Fri Mar 06 2015 NEC EHPCTC AJ -> 1.6
