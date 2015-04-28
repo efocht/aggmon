@@ -1,6 +1,6 @@
 Summary: Service to retrieve Torque metrics
 Name: torque-metricd
-Version: 1.9
+Version: 1.10
 Release: 1%{?dist}
 BuildArch: noarch
 Group: System
@@ -45,6 +45,8 @@ rm -rf %{buildroot}
 /bin/rm -f %{upstartdir}/%{name}.override
 
 %changelog
+* Tue Apr 28 2015 NEC EHPCTC AJ -> 1.10
+- changed def. log dest., fixed problem if tagger cmd is not set, new: create_joblist
 * Thu Apr 07 2015 NEC EHPCTC AJ -> 1.9
 - Added list of running jobs in database
 * Tue Apr 07 2015 NEC EHPCTC EF -> 1.8

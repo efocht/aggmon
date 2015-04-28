@@ -69,15 +69,16 @@ class JobCache(JobTask):
 class JobList(JobTask):
     """ Permanent storage (MongoDB) for Jobs with unique JobID (name) """
     def __init__( self, conf ):
-        self.__joblist = MongoDBJobList( host_name=conf["mongodb_host"], username=conf["mongodb_uname"], password=conf["mongodb_pw"] )
-        self.__call_tagger = conf["call_tagger"]
+        self.__create_joblist = conf["create_joblist"]
+        if self.__create_joblist:
+            self.__joblist = MongoDBJobList( host_name=conf["mongodb_host"], username=conf["mongodb_uname"], password=conf["mongodb_pw"] )
 
     def addJob( self, metric ):
-        if self.__call_tagger:
+        if self.__create_joblist:
             self.__joblist.addJob( metric )
 
     def removeJob( self, name ):
-        if self.__call_tagger:
+        if self.__create_joblist:
             self.__joblist.removeJob( name )
 
     def getList( self ):
@@ -86,8 +87,10 @@ class JobList(JobTask):
 class Tagger(JobTask):
     """ Execute an external program (tagger) that adds Job information to metrics """
     def __init__(self, conf ):
-        self.__cmd = conf["tagger_cmd"]
         self.__call_tagger = conf["call_tagger"]
+        if not self.__call_tagger:
+            return
+        self.__cmd = conf["tagger_cmd"]
         tagger_cmd = self.__cmd + " --reset"
         self.__invoke(tagger_cmd )
         
@@ -143,16 +146,17 @@ global tag_file
 global tag_new
 global acc_log
 
-CONFIG_DEFAULTS = {"acc_file_dir"  : TORQUE_ACCOUNTING_PATH,
-                   "tag_file"      : TORQUE_ACCOUNTING_PATH + "/tag",
-                   "max_acc_files" : 7,
-                   "log_level"     : "warning",
-                   "to_syslog"     : "False",
-                   "mongodb_host"  : "localhost",
-                   "mongodb_uname" : "",
-                   "mongodb_pw"    : "",
-                   "include_cpus"  : "False",
-                   "call_tagger"   : "False",
+CONFIG_DEFAULTS = {"acc_file_dir"   : TORQUE_ACCOUNTING_PATH,
+                   "tag_file"       : TORQUE_ACCOUNTING_PATH + "/tag",
+                   "max_acc_files"  : 7,
+                   "log_level"      : "warning",
+                   "to_syslog"      : "True",
+                   "mongodb_host"   : "localhost",
+                   "mongodb_uname"  : "",
+                   "mongodb_pw"     : "",
+                   "include_cpus"   : "False",
+                   "call_tagger"    : "False",
+                   "create_joblist" : "True",
                   }
 
 
@@ -330,8 +334,10 @@ def read_config():
     conf["mongodb_uname"] = config.get( "daemon", "mongodb_uname" )
     conf["mongodb_pw"] = config.get( "daemon", "mongodb_pw" )
     conf["include_cpus"] = config.getboolean( "daemon", "include_cpus" )
+    conf["create_joblist"] = config.getboolean( "daemon", "create_joblist" )
     conf["call_tagger"] = config.getboolean( "daemon", "call_tagger" )
-    conf["tagger_cmd"] = config.get("daemon", "tagger_cmd" )
+    if conf["call_tagger"]:
+        conf["tagger_cmd"] = config.get("daemon", "tagger_cmd" )
     return conf
 
 def connect_metric_store( conf ):
