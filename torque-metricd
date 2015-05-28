@@ -91,8 +91,6 @@ class Tagger(JobTask):
         if not self.__call_tagger:
             return
         self.__cmd = conf["tagger_cmd"]
-        tagger_cmd = self.__cmd + " --reset"
-        self.__invoke(tagger_cmd )
         
     def addJob( self, metric ):
         if not self.__call_tagger:
@@ -106,14 +104,15 @@ class Tagger(JobTask):
             regex_str = nodelist[0]
         else:
             regex_str = "RE:^(" + "|".join( nodelist ) + ")$"
-        tagger_cmd = self.__cmd + " --add J %s H \"%s\"" % (metric["name"], regex_str)
+        tagger_opt = " --add J %s H \"%s\"" % (metric["name"], regex_str)
+        tagger_cmd = self.__cmd % tagger_opt
         self.__invoke(tagger_cmd )
 
     def removeJob( self, name ):
         if not self.__call_tagger:
             return
-        del self.__cache[name]
-        tagger_cmd = self.__cmd + " --del J %s" % metric["name"]
+        tagger_opt = " --del J %s" % metric["name"]
+        tagger_cmd = self.__cmd % tagger_opt
         self.__invoke(tagger_cmd )
 
     @staticmethod
@@ -310,13 +309,13 @@ def update_job_tasks( metric , objs ):
             try:
                 obj.addJob( metric )
             except Exception as e:
-                log.error( "Failed to add job metric to %s: %s" % ( str( type( obj ) ), str( e )) )
+                log.error( "Failed to add job metric to %s: %s" % ( obj.__class__.__name__, str( e )) )
     elif metric["value"] in ["aborted", "checkpointed", "deleted", "exited"]:
         for obj in objs:
             try:
                 obj.removeJob( metric["name"] )
             except Exception as e:
-                log.error( "Failed to remove job metric of %s: %s" % ( str( type( obj ) ), str( e )) )
+                log.error( "Failed to remove job metric of %s: %s" % ( obj.__class__.__name__, str( e )) )
     else:
         return    
 
@@ -397,7 +396,7 @@ for file_name in file_names[start:]:
                         store.addMetric( metric )
                         log.debug( "stored: %s" % str( metric ) )
                     except Exception as e:
-                        log.error( "failed to ihandle backlog metric: %s" % str( type( e ) ) )
+                        log.error( "failed to handle backlog metric: %s" % str( e.__class__.__name__ ) )
                     update_job_tasks( metric, [cache] )
             else:
                 if tag_new == tag:
