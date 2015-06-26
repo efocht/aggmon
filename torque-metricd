@@ -15,8 +15,6 @@ import ConfigParser
 import glob
 import md5
 import os
-import re
-import shlex
 import signal
 import subprocess
 import socket
@@ -26,8 +24,7 @@ import logging.handlers
 import time
 import psutil
 import copy
-from metric_store import MongoDBMetricStore, MongoDBJobList, JMetric, NMetric
-import cmd
+from metric_store import MongoDBMetricStore, MongoDBJobList, JMetric
 
 """
 This script mainly parses the PBS Torque accounting events and puts these
@@ -85,7 +82,7 @@ class JobList(JobTask):
         return self.__joblist.getList()
 
 class Tagger(JobTask):
-    """ Execute an external program (tagger) that adds Job information to metrics """
+    """ Execute an external program for currently running jobs that e.g. adds Job information to metrics"""
     def __init__(self, conf ):
         self.__call_tagger = conf["call_tagger"]
         if not self.__call_tagger:
@@ -103,24 +100,28 @@ class Tagger(JobTask):
         if len(nodelist) == 1:
             regex_str = nodelist[0]
         else:
-            regex_str = "RE:^(" + "|".join( nodelist ) + ")$"
-        tagger_opt = " --add J %s H \"%s\"" % (metric["name"], regex_str)
-        tagger_cmd = self.__cmd % tagger_opt
-        self.__invoke(tagger_cmd )
+            regex_str = "^(" + "|".join( nodelist ) + ")$"
+        csv_str = ",".join( nodelist )
+        self.__invoke(self.__cmd, ACTION="add", CNODES_REGEX=regex_str, CNODES_CSV=csv_str, **metric )
 
     def removeJob( self, name ):
         if not self.__call_tagger:
             return
-        tagger_opt = " --del J %s" % metric["name"]
-        tagger_cmd = self.__cmd % tagger_opt
-        self.__invoke(tagger_cmd )
+        self.__invoke(self.__cmd, ACTION="del", **metric )
 
     @staticmethod
-    def __invoke( cmd ):
-        r = subprocess.call( shlex.split( cmd ) )
+    def __invoke( cmd, **kwargs ):
+        env = os.environ.copy()
+        for k, v in kwargs.items():
+            env["JOB_" + k.upper()] = str( v )
+        try:
+            args = ["/bin/bash", "-c", cmd]
+            r = subprocess.call( args, env=env )
+        except Exception as e:
+            log.debug( "exception while calling command: %s" % str( e ) )
         if r != 0:
-            log.warn( "calling tagger (%s) failed!" % cmd )
-        
+            log.warn( "calling command (%s) failed!" % cmd )
+
 
 # Constants
 TORQUE_PROC = "pbs_server"
@@ -263,6 +264,11 @@ def parse_torque_accounting_log( line ):
             log.warn( "event (%s...), failed to parse attributes: '%s'" % (line[0:30], attr_str) )
             return None
         if k in ["ctime", "qtime", "etime", "start", "end"]:
+            #ctime: job creation time
+            #qtime: job was queued
+            #etime: job became eligible to run
+            #start: job start time
+            #end: job ended
             v = int( v )
         elif k in ["user", "group", "jobname", "queue", "owner"]:
             pass

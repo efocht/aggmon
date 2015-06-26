@@ -1,6 +1,6 @@
 Summary: Service to retrieve Torque metrics
 Name: torque-metricd
-Version: 1.11
+Version: 1.12
 Release: 1%{?dist}
 BuildArch: noarch
 Group: System
@@ -45,6 +45,8 @@ rm -rf %{buildroot}
 /bin/rm -f %{upstartdir}/%{name}.override
 
 %changelog
+* Thu Jun 25 2015 NEC EHPCTC AJ -> 1.12
+- changed tagger command to use environment variables
 * Thu May 28 2015 NEC EHPCTC AJ -> 1.11
 - do not send --reset to tagger on startup
 * Tue Apr 28 2015 NEC EHPCTC AJ -> 1.10
