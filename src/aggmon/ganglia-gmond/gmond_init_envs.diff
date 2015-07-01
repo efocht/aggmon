@@ -1,0 +1,11 @@
+--- ganglia-3.6.0/gmond/gmond.init_orig	2015-03-10 15:02:30.460046709 +0100
++++ ganglia-3.6.0/gmond/gmond.init	2015-03-30 14:46:35.409397474 +0200
+@@ -10,6 +10,8 @@ TMPDIR=/dev/shm
+ export TMPDIR
+ 
+ . /etc/rc.d/init.d/functions
++[ -f /etc/sysconfig/gmond ] && . /etc/sysconfig/gmond
++export ZMQ_COLLECTOR UDP_RELAY_HOST UDP_RELAY_PORT
+ 
+ RETVAL=0
+ 
