@@ -1,0 +1,5 @@
+./configure
+make
+# in gmond directory:
+make LDFLAGS="-lzmq -lapr-1"
+

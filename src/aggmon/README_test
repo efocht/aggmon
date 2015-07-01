@@ -1,0 +1,8 @@
+# echo 8388608 > /proc/sys/net/core/rmem_max 
+
+env ZMQ_COLLECTOR="ipc:///tmp/gmond_ipc" ./gmond -c gmond_bare.conf
+
+python agg_collector.py --listen="ipc:///tmp/gmond_ipc"
+
+python packet_sender.py gm_packets.dat 100000
+

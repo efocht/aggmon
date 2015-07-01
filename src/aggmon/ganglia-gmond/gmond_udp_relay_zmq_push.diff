@@ -1,0 +1,269 @@
+--- ganglia-3.6.0/gmond/gmond.c_orig	2014-12-23 14:58:45.000000000 +0100
++++ ganglia-3.6.0/gmond/gmond.c	2015-03-31 11:49:43.527180786 +0200
+@@ -54,6 +54,8 @@
+ #include "gm_scoreboard.h"
+ #include "ganglia_priv.h"
+ 
++#include <zmq.h>
++
+ /* Specifies a single value metric callback */
+ #define CB_NOINDEX -1
+ 
+@@ -114,6 +116,12 @@ char *module_dir = NULL;
+ /* The array for outgoing UDP message channels */
+ Ganglia_udp_send_channels udp_send_channels = NULL;
+ 
++/* UDP relay socket for sending out EVERY received UDP message.
++   This cannot be done over the udp_send_channels because it would create
++   an endless loop, since every gmond is sending to itself the metrics that
++   it measures locally. */
++apr_socket_t *udp_relay_socket = NULL;
++
+ /* TODO: The array for outgoing TCP message channels (later) */
+ apr_array_header_t *tcp_send_array = NULL;
+ 
+@@ -226,6 +234,10 @@ apr_array_header_t *collection_groups =
+ mmodule *metric_modules = NULL;
+ extern int daemon_proc; /* defined in error.c */
+ 
++/* zeromq context and push socket */
++void *zctx = NULL;
++void *zsock = NULL;
++
+ char **gmond_argv;
+ extern char **environ;
+ 
+@@ -316,6 +328,10 @@ reload_ganglia_configuration(void)
+   if(udp_recv_sockets != NULL)
+     for(i = 0; udp_recv_sockets[i] != 0; i++)
+       apr_socket_close(udp_recv_sockets[i]);
++  if (zsock != NULL)
++      zmq_close(zsock);
++  if (zctx != NULL)
++      zmq_ctx_destroy(zctx);
+   debug_msg("reloading %s", gmond_bin);
+ #ifndef CYGWIN
+   /* To do: over-ride some config opts:
+@@ -634,6 +650,59 @@ reset_mcast_channels( void )
+ }
+ 
+ static void
++init_udp_relay( void )
++{
++	char *relay_host = getenv("UDP_RELAY_HOST");
++	char *relay_port_env = getenv("UDP_RELAY_PORT");
++	int relay_port;
++
++	if (!relay_host || !relay_port_env)	{
++		debug_msg("Env variables UDP_RELAY_HOST and/or UDP_RELAY_PORT not set.\n");
++		return;
++	}
++	relay_port = atoi(relay_port_env);
++	udp_relay_socket = create_udp_client(global_context, relay_host, relay_port, NULL, NULL, 0);
++}
++
++static void
++init_zmq_pusher( void )
++{
++	char *zmq_data_collector = getenv("ZMQ_COLLECTOR");
++	int hwm = 100000;
++
++	if (!zmq_data_collector) {
++		debug_msg("Env variable ZMQ_COLLECTOR not set.\n");
++	  return;
++	}
++
++	zctx = zmq_ctx_new();
++	if (zctx == NULL) {
++		err_msg("was unable to create zmq context!");
++		exit(1);
++	}
++	zsock = zmq_socket(zctx, ZMQ_PUSH);
++	if (zsock == NULL) {
++		err_msg("unable to open zmq socket!");
++		exit(1);
++	}
++
++	zmq_setsockopt(zsock, ZMQ_SNDHWM, (void *)&hwm, sizeof(hwm));
++
++	if (zmq_connect(zsock, zmq_data_collector) != 0) {
++		err_msg("zmq_connect failed. errno=%d", errno);
++		exit(1);
++	}
++	debug_msg("initialized zeromq, pushing to %s\n", zmq_data_collector);
++}
++
++static void
++close_zmq_pusher( void )
++{
++   zmq_close(zsock);
++   zmq_ctx_destroy(zctx);
++}
++
++static void
+ setup_listen_channels_pollset( void )
+ {
+   apr_status_t status;
+@@ -1221,6 +1290,34 @@ Ganglia_metadata_free( Ganglia_metadata
+ }
+ #endif
+ 
++#define MAX_JSON_LEN 2048
++static char *
++alloc_json(void)
++{
++	return (char *)malloc(2048);
++}
++
++static void
++free_json(void *data, void *hint)
++{
++	free(data);
++}
++
++static int
++send_json_zmq(char *json)
++{
++	zmq_msg_t msg;
++	int rc;
++
++	zmq_msg_init_data (&msg, (void *)json, strlen(json) < MAX_JSON_LEN ? strlen(json) : MAX_JSON_LEN, free_json, NULL);
++	rc = zmq_sendmsg(zsock, &msg, ZMQ_DONTWAIT);
++	/* Actually ignore if EAGAIN is returned. Is this right? 
++	   All that we want is to drop sending messages if the send queue is full, such that
++		 we don't block gmond in that case. But: is EAGAIN something we might get in other
++		 situations as well and make us lose more messages than we think? */
++	return rc;
++}
++
+ void
+ Ganglia_metadata_save( Ganglia_host *host, Ganglia_metadata_msg *message )
+ {
+@@ -1296,7 +1393,33 @@ Ganglia_metadata_save( Ganglia_host *hos
+           }
+     
+         metric->last_heard_from = apr_time_now();
+-    
++
++				if (zsock) {
++					char *json, *json_m;
++
++					json = alloc_json();
++					sprintf(json, "{\"HOST\":\"%s\",\"NAME\":\"%s\",\"TYPE\":\"%s\",\"UNITS\":\"%s\","
++									"\"SLOPE\":%d,\"TMAX\":%d,\"DMAX\":%d",
++									fmessage->Ganglia_metadata_msg_u.gfull.metric_id.host,
++									fmessage->Ganglia_metadata_msg_u.gfull.metric_id.name,
++									fmessage->Ganglia_metadata_msg_u.gfull.metric.type,
++									fmessage->Ganglia_metadata_msg_u.gfull.metric.units,
++									fmessage->Ganglia_metadata_msg_u.gfull.metric.slope,
++									fmessage->Ganglia_metadata_msg_u.gfull.metric.tmax,
++									fmessage->Ganglia_metadata_msg_u.gfull.metric.dmax);
++					json_m = json + strlen(json);
++					if (mlen)
++						for (i = 0; i < mlen; i++) {
++							sprintf(json_m, ",\"%s\":\"%s\"",
++											fmessage->Ganglia_metadata_msg_u.gfull.metric.metadata.metadata_val[i].name,
++											fmessage->Ganglia_metadata_msg_u.gfull.metric.metadata.metadata_val[i].data);
++							json_m = json + strlen(json);
++						}
++					sprintf(json_m, "}");
++					debug_msg("%s\n", json);
++					send_json_zmq(json);
++				}
++
+         /* Save the full metric */
+         apr_thread_mutex_lock(host->mutex);
+         apr_hash_set(host->metrics, metric->name, APR_HASH_KEY_STRING, metric);
+@@ -1384,6 +1507,8 @@ Ganglia_value_save( Ganglia_host *host,
+       vmessage->Ganglia_value_msg_u.gstr.fmt = 
+           apr_pstrdup(metric->pool, message->Ganglia_value_msg_u.gstr.fmt);
+ 
++      metric->last_heard_from = apr_time_now();
++
+       switch(message->id)
+         {
+         case gmetric_string:
+@@ -1418,7 +1543,54 @@ Ganglia_value_save( Ganglia_host *host,
+           break;
+         }
+ 
+-      metric->last_heard_from = apr_time_now();
++			if (zsock) {
++				char *json, *json_val;
++
++				json = alloc_json();
++				sprintf(json, "{\"N\":\"%s\",\"H\":\"%s\",\"T\":%-10.1f,\"V\":",
++								vmessage->Ganglia_value_msg_u.gstr.metric_id.name,
++								vmessage->Ganglia_value_msg_u.gstr.metric_id.host,
++								(double)metric->last_heard_from/1000000);
++				json_val = json + strlen(json);
++
++				switch(message->id)
++				{
++				case gmetric_string:
++					sprintf(json_val, "\"%s\"", vmessage->Ganglia_value_msg_u.gstr.str);
++					break;
++				case gmetric_ushort:
++					sprintf(json_val, message->Ganglia_value_msg_u.gu_short.fmt,
++									vmessage->Ganglia_value_msg_u.gu_short.us);
++					break;
++				case gmetric_short:
++					sprintf(json_val, message->Ganglia_value_msg_u.gs_short.fmt,
++									vmessage->Ganglia_value_msg_u.gs_short.ss);
++					break;
++				case gmetric_uint:
++					sprintf(json_val, message->Ganglia_value_msg_u.gu_int.fmt,
++									vmessage->Ganglia_value_msg_u.gu_int.ui);
++					break;
++				case gmetric_int:
++					sprintf(json_val, message->Ganglia_value_msg_u.gs_int.fmt,
++									vmessage->Ganglia_value_msg_u.gs_int.si);
++					break;
++				case gmetric_float:
++					sprintf(json_val, message->Ganglia_value_msg_u.gf.fmt,
++									vmessage->Ganglia_value_msg_u.gf.f);
++					break;
++				case gmetric_double:
++					sprintf(json_val, message->Ganglia_value_msg_u.gd.fmt,
++									vmessage->Ganglia_value_msg_u.gd.d);
++					break;
++				default:
++					break;
++				}
++				json_val = json + strlen(json);
++
++				sprintf(json_val, "}");
++				debug_msg("%s\n", json);
++				send_json_zmq(json);
++			}
+ 
+       /* Save the last update metric */
+       apr_thread_mutex_lock(host->mutex);
+@@ -1504,6 +1676,10 @@ process_udp_recv_channel(const apr_pollf
+   }
+ #endif
+ 
++	/* Relay received message through UDP */
++	if (udp_relay_socket)
++		apr_socket_send( udp_relay_socket, buf, &len );
++
+   /* Create the XDR receive stream */
+   xdrmem_create(&x, buf, max_udp_message_len, XDR_DECODE);
+ 
+@@ -3267,6 +3443,8 @@ main ( int argc, char *argv[] )
+       exit(0);
+     }
+ 
++  init_zmq_pusher();
++
+   daemonize_if_necessary( argv );
+   if (args_info.pid_file_given)
+     {
+@@ -3308,6 +3486,7 @@ main ( int argc, char *argv[] )
+     {
+       setup_collection_groups();
+     }
++	init_udp_relay();
+ 
+   /* Create the host hash table */
+   hosts = apr_hash_make( global_context );
