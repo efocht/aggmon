@@ -1,9 +1,11 @@
+#!/usr/bin/python
+
 import argparse
 import copy
 import json
 import logging
 import os
-import pdb
+import wdb
 import subprocess
 import sys
 import time
@@ -44,7 +46,7 @@ config = {
             "alias" : "/universe",
             "job_agg_nodes": ["localhost"],
             "mongo_store_nodes" : ["localhost"],
-            "agg_pub_sub_nodes" : ["localhost"]
+            "collector_nodes" : ["localhost"]
         }
     },
     "services": {
@@ -54,7 +56,7 @@ config = {
                    "--group %(group)s --state-file %(statefile)s --dispatcher %(dispatcher)s",
             "cmdport_range": "5100-5199",
             "component_key": ["group", "host"],
-            "listen_port_range": "5200-5299",
+            "listen_port_range": "5262",
             "logfile": "/tmp/%(service)s_%(group)s.log"
         },
         "mongo_store": {
