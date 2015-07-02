@@ -29,7 +29,7 @@ from metric_store.mongodb_store import *
 log = logging.getLogger( __name__ )
 
 
-class MongoStore(threading.Thread):
+class DataStore(threading.Thread):
     def __init__(self, hostname, port, db_name, username="", password="",
                  group="/universe", coll_prefix="gmetric", value_metrics_ttl=180*24*3600):
         self.queue = Queue()
@@ -48,7 +48,7 @@ class MongoStore(threading.Thread):
         self.daemon = True
 
     def run(self):
-        log.info( "[Started MongoStore Thread]" )
+        log.info( "[Started DataStore Thread]" )
         self.req_worker()
 
     def load_md_cache(self):
@@ -162,10 +162,10 @@ if __name__ == "__main__":
     mongo_port = int(mongo_port)
 
     try:
-        store = MongoStore(mongo_host, mongo_port, pargs.dbname, pargs.user, pargs.passwd,
+        store = DataStore(mongo_host, mongo_port, pargs.dbname, pargs.user, pargs.passwd,
                            pargs.group, coll_prefix=pargs.prefix, value_metrics_ttl=pargs.expire*24*3600)
     except Exception as e:
-        log.error("Failed to create MongoStore: %r" % e)
+        log.error("Failed to create DataStore: %r" % e)
         sys.exit(1)
     store.start()
 
