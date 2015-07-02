@@ -5,7 +5,7 @@ import copy
 import json
 import logging
 import os
-import wdb
+import pdb
 import subprocess
 import sys
 import time
@@ -42,8 +42,7 @@ push to them. The configuration, which metrics shall be aggregated and how, must
 
 config = {
     "groups": {
-        "universe": {
-            "alias" : "/universe",
+        "/universe": {
             "job_agg_nodes": ["localhost"],
             "mongo_store_nodes" : ["localhost"],
             "collector_nodes" : ["localhost"]
@@ -53,7 +52,7 @@ config = {
         "collector": {
             "cwd": os.getcwd(),
             "cmd": "python agg_collector.py --cmd-port %(cmdport)s --listen %(listen)s " + \
-                   "--group %(group)s --state-file %(statefile)s --dispatcher %(dispatcher)s",
+                   "--group %(group_path)s --state-file %(statefile)s --dispatcher %(dispatcher)s",
             "cmdport_range": "5100-5199",
             "component_key": ["group", "host"],
             "listen_port_range": "5262",
@@ -62,7 +61,7 @@ config = {
         "mongo_store": {
             "cwd": os.getcwd(),
             "cmd": "python mongo_store.py --cmd-port %(cmdport)s --listen %(listen)s " + \
-                   "--group %(group)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
+                   "--group %(group_path)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
             "cmdport_range": "5100-5199",
             "component_key":  ["group", "host"],
             "listen_port_range": "5200-5299",
@@ -152,21 +151,24 @@ try:
 except:
     subprocess.check_output = check_output
 
+def group_name(group):
+    return group.lstrip("/").replace("/", "_")
 
-def start_component(service, group, __CALLBACK=None, __CALLBACK_ARGS=[], **kwds):
+def start_component(service, group_path, __CALLBACK=None, __CALLBACK_ARGS=[], **kwds):
     global config, component_start_cb
 
-    if group not in config["groups"]:
-        log.error("start_component: group '%s' not found in configuration!" % group)
+    if group_path not in config["groups"]:
+        log.error("start_component: group '%s' not found in configuration!" % group_path)
         return False
     if service not in config["services"]:
         log.error("start_component: service '%s' not found in configuration!" % service)
         return False
+    group = group_name(group_path)
     nodes_key = "%s_nodes" % service
-    if nodes_key not in config["groups"][group]:
-        log.error("start_component: '%s' not found in configuration of group '%s'!" % (nodes_key, group))
+    if nodes_key not in config["groups"][group_path]:
+        log.error("start_component: '%s' not found in configuration of group '%s'!" % (nodes_key, group_path))
         return False
-    nodes = config["groups"][group][nodes_key]
+    nodes = config["groups"][group_path][nodes_key]
     assert(isinstance(nodes, list))
     locals().update(kwds)
     svc_info = config["services"][service]
@@ -197,13 +199,14 @@ def start_component(service, group, __CALLBACK=None, __CALLBACK_ARGS=[], **kwds)
             # trying the next node, if any
 
 
-def kill_component(service, group, __CALLBACK=None, __CALLBACK_ARGS=[], METHOD="msg", **kwds):
-    global config, component_kill_cb, zmq_context
+def kill_component(service, group_path, __CALLBACK=None, __CALLBACK_ARGS=[], METHOD="msg", **kwds):
+    global config, component_kill_cb, zmq_context, pargs
 
-    msg = {"component": service, "group": group}
+    msg = {"component": service, "group": group_path}
     msg.update(kwds)
     res = False
 
+    group = group_name(group_path)
     state = get_component_state(msg)
     if state is None:
         log.warning("component '%s' state not found. Don't know how to kill it." % service)
@@ -223,7 +226,8 @@ def kill_component(service, group, __CALLBACK=None, __CALLBACK_ARGS=[], METHOD="
         try:
             exec_cmd = config["global"]["remote_kill"] % state
             out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
-            res = del_component_state(msg)
+            #res = del_component_state(msg)
+            send_rpc(zmq_context, pargs.cmd_port, "del_component_state", **msg)
         except Exception as e:
             log.error("subprocess error when running '%s' : '%r'" % (exec_cmd, e))
             res = False
@@ -290,7 +294,7 @@ def del_component_state(msg):
     if "component" not in msg:
         return False
     component = msg["component"]
-    if "component" not in component_state:
+    if component not in component_state:
         return False
     key = component_key(config["services"][component]["component_key"], msg)
     if len(key) > 0:
@@ -340,9 +344,9 @@ def get_job_agg_port(jobid):
 
 def get_top_level_group():
     global config
-    for group, gconfig in config["groups"].items():
-        if gconfig["alias"].count("/") == 1:
-            return group
+    for group_path in config["groups"].keys():
+        if group_path.count("/") == 1:
+            return group_path
 
 
 def get_push_target(name):
@@ -487,7 +491,7 @@ def load_component_state(name, mode="keep"):
           ...?
     """
     loaded = load_state(name)
-    if len(loaded) == 0:
+    if len(loaded) == 0 or len(loaded[0]) == 0:
         return None
     loaded_state = loaded[0]
     #
@@ -538,20 +542,22 @@ def make_timers_and_save(msg):
 
 
 def start_missing_components():
-    for group in config["groups"]:
-        pub = get_component_state({"component": "collector", "group": group})
+    for group_path in config["groups"]:
+        group = group_name(group_path)
+        pub = get_component_state({"component": "collector", "group": group_path})
         if pub is None:
-            start_component("collector", group, statefile="/tmp/state.agg_collector_%s" % group,
+            start_component("collector", group_path, statefile="/tmp/state.agg_collector_%s" % group,
                             dispatcher=me_rpc)
     while "collector" not in component_state:
         time.sleep(0.1)
     time.sleep(2)
 
     msgbus_arr = ["--msgbus %s" % cmd_port for cmd_port in get_all_pubs_cmd_ports()]
-    for group in config["groups"]:
-        mong = get_component_state({"component": "mongo_store", "group": group})
+    for group_path in config["groups"]:
+        group = group_name(group_path)
+        mong = get_component_state({"component": "mongo_store", "group": group_path})
         if mong is None:
-            start_component("mongo_store", group, statefile="/tmp/state.mongo_store_%s" % group,
+            start_component("mongo_store", group_path, statefile="/tmp/state.mongo_store_%s" % group,
                             dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
 
     #
@@ -561,16 +567,16 @@ def start_missing_components():
 
 
 def kill_components():
-    for group in config["groups"]:
+    for group_path in config["groups"]:
         for comp_type in ("collector", "mongo_store", "job_agg"):
-            c = get_component_state({"component": comp_type, "group": group})
+            c = get_component_state({"component": comp_type, "group": group_path})
             if c is not None:
                 if "component" in c:
-                    kill_component(comp_type, group, METHOD="kill")
+                    kill_component(comp_type, group_path, METHOD="kill")
                 else:
                     log.info("components: %r" % c)
                     for jobid, jagg in c.items():
-                        kill_component(comp_type, group, jobid=jobid, METHOD="kill")
+                        kill_component(comp_type, group_path, jobid=jobid, METHOD="kill")
 
 
 if __name__ == "__main__":
@@ -615,7 +621,7 @@ if __name__ == "__main__":
     # TODO: add smart starter of components: check/load saved state, query a resend, kill and restart if no update?
     res = load_component_state(pargs.state_file)
 
-    if pargs.kill:
+    if res is not None and pargs.kill:
         log.info("... waiting 70 seconds for state messages to come in ...")
         time.sleep(70)
         log.info("killing components that were found running...")
@@ -629,7 +635,8 @@ if __name__ == "__main__":
     # TODO: deal with job aggs
     #
     if res is not None:
-        time.sleep(65)
+        log.info("Restarting: waiting 70 seconds for state messages to come in ...")
+        time.sleep(70)
     start_missing_components()
 
     rpc.register_rpc("add_tag", lambda x: relay_to_pubs(zmq_context, "add_tag", x), post=save_state_post)
