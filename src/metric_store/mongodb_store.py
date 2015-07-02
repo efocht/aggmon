@@ -157,18 +157,18 @@ class MongoDBMetricStore(MongoDBStore):
     def insert_md( self, md ):
         hpath = md["CLUSTER"]
         group_name = md["CLUSTER"].split("/")[-1]
-        group = {"NAME": group_name, "hpath": hpath, "_type": "Group"}
+        group = {"NAME": group_name, "hpath": hpath, "_type": "MGroup"}
         spec = {"NAME": md["NAME"], "HOST": md["HOST"], "CLUSTER": md["CLUSTER"]}
         self._col_md.update( {"hpath": hpath}, {"$set": group}, upsert=True )
 
         if md["HOST"] != "":
             hpath += "/" + md["HOST"]
-            host = {"NAME": md["HOST"], "hpath": hpath, "_type": "Host"}
+            host = {"NAME": md["HOST"], "hpath": hpath, "_type": "MHost"}
             self._col_md.update( {"hpath": hpath}, {"$set": host}, upsert=True )
 
         hpath += "/" + md["NAME"]
         md["hpath"] = hpath
-        md["_type"] = "Metric"
+        md["_type"] = "MMetric"
         return self._col_md.update( {"hpath": hpath}, {"$set": md}, upsert=True )
 
 

@@ -6,11 +6,14 @@ import logging
 import os
 import sys
 import re
-import pdb
+import wdb
 from pymongo import MongoClient, ASCENDING
 import threading
 import time
-import ujson
+try:
+    import ujson as json
+except ImportError:
+    import json
 import zmq
 from Queue import Queue, Empty
 from agg_component import get_kwds, ComponentState
@@ -19,6 +22,12 @@ from agg_mcache import MCache
 
 
 log = logging.getLogger( __name__ )
+# Path Fix
+sys.path.append(
+    os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__), "../")))
+
 
 
 class MongoStore(threading.Thread):
@@ -238,7 +247,7 @@ if __name__ == "__main__":
         try:
             s = receiver.recv()
             #log.info("received msg on PULL port: %r" % s)
-            msg = ujson.loads(s)
+            msg = json.loads(s)
 
             cmd = None
             if "_COMMAND_" in msg:

@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 #
 # Manages subscriptions and matches messages according to them.
 #
@@ -5,7 +7,7 @@
 import argparse
 import logging
 import os
-import pdb
+import wdb
 import pickle
 import re
 import socket
@@ -47,7 +49,7 @@ class AggPubMatch(object):
                 self.send_socket[target] = sock
 
     def publish(self, msg):
-        jmsg = ujson.dumps(msg)
+        jmsg = json.dumps(msg)
         targets = self.match(msg)
         for target in targets:
             sock = self.send_socket[target]
@@ -146,7 +148,7 @@ class AggPubThread(threading.Thread, AggPubMatch):
         while not self.stopping:
             try:
                 msg = self.queue.get()
-                #msg = ujson.loads(s)
+                #msg = json.loads(s)
                 self.queue.task_done()
                 #msg = self.queue.popleft()
             except (KeyboardInterrupt, SystemExit) as e:
@@ -214,7 +216,7 @@ class SubscriberQueue(threading.Thread):
             try:
                 s = self.receiver.recv()
                 #print "received:", s
-                msg = ujson.loads(s)
+                msg = json.loads(s)
 
                 if self.pre is not None:
                     msg = self.pre(msg)
@@ -223,7 +225,8 @@ class SubscriberQueue(threading.Thread):
                 if count == 0:
                     tstart = time.time()
                 count += 1
-                if count % 10000 == 0 or "PRINT" in msg:
+                #if count % 10000 == 0 or "PRINT" in msg:
+                if count % 10 == 0 or "PRINT" in msg:
                     tend = time.time()
                     sys.stdout.write("%d msgs in %f seconds, %f msg/s\n" %
                                      (count, tend - tstart, float(count)/(tend - tstart)))
