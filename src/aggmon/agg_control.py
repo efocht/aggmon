@@ -24,8 +24,8 @@ that the components get linked with each other according to the hierarchy.
 
 For each administrative (monitoring) group agg_control will start:
 - one agg_pub_sub instance. This instance waits for ZMQ PUSH messages with metric metadata or
-  metric values. It handles subscriptions from other components like mongo_store or job aggregators.
-- one mongo_store instance. mongo_store instances will subscribe to the metric messages
+  metric values. It handles subscriptions from other components like data_store or job aggregators.
+- one data_store instance. data_store instances will subscribe to the metric messages
   published by their corresponding agg_pub_sub instances.
 
 agg_control will receive tagger requests which it will pass on to all agg_pub_sub instances.
@@ -44,7 +44,7 @@ config = {
     "groups": {
         "/universe": {
             "job_agg_nodes": ["localhost"],
-            "mongo_store_nodes" : ["localhost"],
+            "data_store_nodes" : ["localhost"],
             "collector_nodes" : ["localhost"]
         }
     },
@@ -58,9 +58,9 @@ config = {
             "listen_port_range": "5262",
             "logfile": "/tmp/%(service)s_%(group)s.log"
         },
-        "mongo_store": {
+        "data_store": {
             "cwd": os.getcwd(),
-            "cmd": "python mongo_store.py --cmd-port %(cmdport)s --listen %(listen)s " + \
+            "cmd": "python data_store.py --cmd-port %(cmdport)s --listen %(listen)s " + \
                    "--group %(group_path)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
             "cmdport_range": "5100-5199",
             "component_key":  ["group", "host"],
@@ -352,7 +352,7 @@ def get_top_level_group():
 def get_push_target(name):
     if name == "@TOP_STORE":
         top_group = get_top_level_group()
-        top_store_state = get_component_state({"component": "mongo_store", "group": top_group})
+        top_store_state = get_component_state({"component": "data_store", "group": top_group})
         if top_store_state is not None and "listen" in top_store_state:
             return top_store_state["listen"]
 
@@ -555,9 +555,9 @@ def start_missing_components():
     msgbus_arr = ["--msgbus %s" % cmd_port for cmd_port in get_all_pubs_cmd_ports()]
     for group_path in config["groups"]:
         group = group_name(group_path)
-        mong = get_component_state({"component": "mongo_store", "group": group_path})
+        mong = get_component_state({"component": "data_store", "group": group_path})
         if mong is None:
-            start_component("mongo_store", group_path, statefile="/tmp/state.mongo_store_%s" % group,
+            start_component("data_store", group_path, statefile="/tmp/state.data_store_%s" % group,
                             dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
 
     #
@@ -568,7 +568,7 @@ def start_missing_components():
 
 def kill_components():
     for group_path in config["groups"]:
-        for comp_type in ("collector", "mongo_store", "job_agg"):
+        for comp_type in ("collector", "data_store", "job_agg"):
             c = get_component_state({"component": comp_type, "group": group_path})
             if c is not None:
                 if "component" in c:
@@ -646,7 +646,7 @@ if __name__ == "__main__":
 
     #time.sleep(30)
     #kill_component("collector", "universe")
-    #kill_component("mongo_store", "universe")
+    #kill_component("data_store", "universe")
 
     while True:
         try:
