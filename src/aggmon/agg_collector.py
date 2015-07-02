@@ -300,7 +300,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument('-C', '--cmd-port', default="tcp://127.0.0.1:5556", action="store", help="RPC command port")
     ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
-    ap.add_argument('-g', '--group', default="universe", action="store", help="group for this message bus. Default: universe")
+    ap.add_argument('-g', '--group', default="universe", action="store", help="group for this message bus. Default: /universe")
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
     ap.add_argument('-L', '--listen', default="tcp://127.0.0.1:5555", action="store", help="zmq pull port to listen on")
     ap.add_argument('-M', '--msgbus', default="", action="store", help="subscription port for other message bus")
