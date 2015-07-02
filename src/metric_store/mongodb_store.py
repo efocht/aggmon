@@ -12,6 +12,7 @@
 #
 import sys
 import time
+import datetime
 from pymongo import MongoClient, ASCENDING
 from pymongo.son_manipulator import AutoReference, NamespaceInjector
 from bson.code import Code
