@@ -1,12 +1,11 @@
 #!/usr/bin/python
 
 import argparse
-import datetime
 import logging
 import os
 import sys
 import re
-import wdb
+import pdb
 from pymongo import MongoClient, ASCENDING
 import threading
 import time
@@ -19,27 +18,28 @@ from Queue import Queue, Empty
 from agg_component import get_kwds, ComponentState
 from agg_rpc import *
 from agg_mcache import MCache
-
-
-log = logging.getLogger( __name__ )
 # Path Fix
 sys.path.append(
     os.path.abspath(
         os.path.join(
             os.path.dirname(__file__), "../")))
+from metric_store.mongodb_store import *
 
+
+log = logging.getLogger( __name__ )
 
 
 class MongoStore(threading.Thread):
     def __init__(self, hostname, port, db_name, username="", password="",
-                 group="universe", coll_prefix="gmetric", value_metrics_ttl=180*24*3600):
+                 group="/universe", coll_prefix="gmetric", value_metrics_ttl=180*24*3600):
         self.queue = Queue()
         self.group = group
         self.coll_prefix = coll_prefix
         self.value_metrics_ttl = value_metrics_ttl
-        self.db = self.mongo_open(hostname, port, db_name, username, password)
-        if self.db is None:
-            raise Exception("Could not open Mongo DB")
+        self.store = MongoDBMetricStore(host_name=hostname, port=port, db_name=db_name,
+                                        username=username, password=password, group=group)
+        if self.store is None:
+            raise Exception("Could not connect to Mongo DB")
         self.md_cache = MCache()
         self.v_cache = MCache()
         self.load_md_cache()
@@ -47,63 +47,19 @@ class MongoStore(threading.Thread):
         threading.Thread.__init__(self, name="mongo_store")
         self.daemon = True
 
-
     def run(self):
         log.info( "[Started MongoStore Thread]" )
         self.req_worker()
 
-
     def load_md_cache(self):
-        coll_name = self.coll_prefix + "_md"
-        md_coll = self.db[coll_name]
         log.info("loading md cache ...")
-        for d in md_coll.find({"CLUSTER": self.group}, {"_id": False, "HOST": True, "NAME": True, "TYPE": True}):
+        for d in self.store.find_md( match={"CLUSTER": self.group} ):
             self.md_cache.set(d["HOST"], d["NAME"], d["TYPE"])
-    
+
     def show_md_cache(self):
         for k, v in self.md_cache.items():
             print("%s: %s" % (k, v))
     
-    
-    def mongo_open(self, hostname, port, db_name, username="", password=""):
-        """
-        Returns db object
-        """
-        try:
-            client = MongoClient( hostname, port )
-        except Exception as e:
-            print "Exception when opening mongo db: %r" % e
-            return None
-        else:
-            db = client[db_name]
-            if username != "":
-                db.authenticate(username, password, mechanism='MONGODB-CR')
-            return db
-        return None
-
-
-    def mongo_insert_metadata(self, metric):
-        coll_name = self.coll_prefix + "_md"
-        md_coll = self.db[coll_name]
-        md_coll.ensure_index( [("HOST", ASCENDING), ("NAME", ASCENDING), ("CLUSTER", ASCENDING)], unique=True )
-    
-        spec = {"NAME": metric["NAME"], "HOST": metric["HOST"], "CLUSTER": self.group}
-        return md_coll.update( spec, {"$set": metric}, upsert=True )
-    
-    
-    def mongo_insert_value(self, metric):
-        #
-        coll_name = "%s_val_%s" % (self.coll_prefix, self.group)
-        v_coll = self.db[coll_name]
-        v_coll.ensure_index( [("H", ASCENDING), ("N", ASCENDING), ("T", ASCENDING)], unique=True )
-        v_coll.ensure_index( [("J", ASCENDING)], unique=False, background=True )
-        # make sure the time has proper format such that TTL will expire it eventually
-        metric["T"] = datetime.datetime.fromtimestamp(metric["T"])
-        v_coll.ensure_index([("T", ASCENDING)], unique=False, background=True,
-                            expireAfterSeconds=self.value_metrics_ttl)
-        return v_coll.insert( metric )
-
-
     def req_worker(self):
         while not self.stopping:
             try:
@@ -121,14 +77,14 @@ class MongoStore(threading.Thread):
                 #
                 log.debug("mongo_store: val = %r" % val)
                 if "SLOPE" in val:
-                    # this must be a metadata record
+                    # this must be a metadata record coming from gmond/ganglia
                     # is this in cache?
                     _type = self.md_cache.get(val["HOST"], val["NAME"])
                     if _type is not None and _type == val["TYPE"]:
                         log.debug( "skipping MD insert for host=%s, metric=%s" % (val["HOST"], val["NAME"]) )
                         continue
                     val["CLUSTER"] = self.group
-                    res = self.mongo_insert_metadata(val)
+                    res = self.store.insert_md(val)
                     log.debug("insert_metadata returned: %r" % res)
                     if "upserted" in res:
                         log.debug( "feeding cache:", val["HOST"], val["NAME"], res["upserted"], val["TYPE"] )
@@ -149,7 +105,7 @@ class MongoStore(threading.Thread):
                         elif isinstance(v, float):
                             _type = "float"
                         md = {"HOST": val["H"], "NAME": val["N"], "TYPE": _type, "CLUSTER": self.group}
-                        res = self.mongo_insert_metadata(md)
+                        res = self.store.insert_md(md)
                         log.debug("insert_metadata returned: %r" % res)
                         if "upserted" in res:
                             log.debug( "feeding cache:", md["HOST"], md["NAME"], res["upserted"], md["TYPE"] )
@@ -167,7 +123,7 @@ class MongoStore(threading.Thread):
                     elif _type in ("float", "double"):
                         if not isinstance(val["V"], float):
                             val["V"] = float(val["V"])
-                    res = self.mongo_insert_value(val)
+                    res = self.store.insert_val(val)
                     log.debug( "inserted %r" % val )
                     self.v_cache.set(val["H"], val["N"], val["T"])
             except Exception as e:
