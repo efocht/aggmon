@@ -13,6 +13,12 @@ import zmq
 from agg_rpc import send_rpc, zmq_own_addr_for_uri, RPCThread
 from agg_job_command import send_agg_command
 from repeat_timer import RepeatTimer
+# Path Fix
+sys.path.append(
+    os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__), "../")))
+from metric_store.mongodb_store import *
 
 
 log = logging.getLogger( __name__ )
@@ -61,6 +67,7 @@ config = {
         "data_store": {
             "cwd": os.getcwd(),
             "cmd": "python data_store.py --cmd-port %(cmdport)s --listen %(listen)s " + \
+                   "--dbname \"%(dbname)s\" --host \"%(dbhost)s\"" + \
                    "--group %(group_path)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
             "cmdport_range": "5100-5199",
             "component_key":  ["group", "host"],
@@ -76,6 +83,12 @@ config = {
             "listen_port_range": "5300-5999",
             "logfile": "/tmp/%(service)s_%(jobid)s.log"
         }
+    },
+    "database": {
+        "dbname": "metricdb",
+        "dbhost": "localhost:27017",
+        "user": "",
+        "password": ""
     },
     "global": {
         "local_cmd"  : "cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &",
@@ -120,6 +133,9 @@ me_rpc = ""
 
 # ZeroMQ context (global)
 zmq_context = None
+
+# list of running jobs, as fresh as the mongodb collection
+job_list = []
 
 
 def component_key(keys, kwds):
@@ -171,6 +187,9 @@ def start_component(service, group_path, __CALLBACK=None, __CALLBACK_ARGS=[], **
     nodes = config["groups"][group_path][nodes_key]
     assert(isinstance(nodes, list))
     locals().update(kwds)
+    if "database" in config:
+        if isinstance(config["database"], dict):
+            locals().update(config["database"])
     svc_info = config["services"][service]
     cwd = svc_info["cwd"]
     cmd = svc_info["cmd"]
@@ -247,11 +266,16 @@ def set_component_state(msg):
         component_state[component] = {}
     # now make a meaningful minimal unique key
     key = component_key(config["services"][component]["component_key"], msg)
+    started = None
     if key in component_state[component]:
         log.info("set_component_state: updating state for %s %s" % (component, key))
+        started = component[component][key]["started"]
     else:
         log.info("set_component_state: setting state for %s %s" % (component, key))
     msg["last_update"] = time.time()
+    if started is not None:
+        if started != msg["started"]:
+            msg["restart!"] = True
     component_state[component][key] = msg
     cbkey = component + ":" + key
     if cbkey in component_start_cb:
@@ -408,7 +432,7 @@ def create_job_agg_instance(jobid):
     if jagg is not None:
         return
     msgbus_arr = ["--msgbus %s" % cmd_port for cmd_port in get_all_pubs_cmd_ports()]
-    start_component("job_agg", "universe", jobid=jobid, __CALLBACK=make_timers, __CALLBACK_ARGS=[jobid],
+    start_component("job_agg", "/universe", jobid=jobid, __CALLBACK=make_timers, __CALLBACK_ARGS=[jobid],
                     dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
     # wait for component to appear?
     # create timer instance and set in component_state? can this be handled as a callback?
@@ -424,16 +448,17 @@ def remove_job_agg_instance(jobid):
             timer.stop()
     jagg = get_component_state({"component": "job_agg", "jobid": jobid})
     if jagg is not None:
-        kill_component("job_agg", "universe", jobid=jobid)
+        kill_component("job_agg", "/universe", jobid=jobid)
         # TODO: sending quit message should happen in kill_component
         #send_agg_command(zmq_context, jagg["listen"], "quit")
+        # TODO: notify collectors and unsubscribe disappearing jobid
 
 
 def remove_all_job_agg_instances():
     pass
 
 
-def relay_to_pubs(context, cmd, msg):
+def relay_to_collectors(context, cmd, msg):
     """
     Instantiate a job_agg component when new job tags are defined,
     kill job_agg component when tag is removed (i.e. job has finished).
@@ -446,7 +471,8 @@ def relay_to_pubs(context, cmd, msg):
         jobid = msg["TAG_VALUE"]
         remove_job_agg_instance(jobid)
     elif cmd == "reset_tags":
-        remove_all_job_agg_instances()
+        pass
+        #remove_all_job_agg_instances()
 
     for cmd_port in get_all_pubs_cmd_ports():
         log.info("relaying msg to '%s'" % cmd_port)
@@ -499,7 +525,12 @@ def load_component_state(name, mode="keep"):
     #
     # request resend of state from all components
     for component, compval in loaded_state.items():
+        component_state[component] = compval
         for ckey, cstate in compval.items():
+            # set the "outdated!" attribute
+            # it will disappear if the component sends a component update message
+            # thus it is used for marking non-working components
+            component_state[component][ckey]["outdated!"] = True
             request_resend(cstate)
             time.sleep(0.05)
     # create timers for running aggregators
@@ -507,6 +538,7 @@ def load_component_state(name, mode="keep"):
         for jobid, jstate in loaded_state["job_agg"].items():
             make_timers(jobid)
     return True
+
 
 def save_state(name, state):
     """
@@ -542,10 +574,12 @@ def make_timers_and_save(msg):
 
 
 def start_missing_components():
+    global job_list
+
     for group_path in config["groups"]:
         group = group_name(group_path)
         pub = get_component_state({"component": "collector", "group": group_path})
-        if pub is None:
+        if pub is None or "outdated!" in pub:
             start_component("collector", group_path, statefile="/tmp/state.agg_collector_%s" % group,
                             dispatcher=me_rpc)
     while "collector" not in component_state:
@@ -556,14 +590,34 @@ def start_missing_components():
     for group_path in config["groups"]:
         group = group_name(group_path)
         mong = get_component_state({"component": "data_store", "group": group_path})
-        if mong is None:
+        if mong is None or "outdated!" in mong:
             start_component("data_store", group_path, statefile="/tmp/state.data_store_%s" % group,
                             dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
+
+    # TODO: fixup subscriptions on collectors
+    #
+    for cmd_port in get_all_pubs_cmd_ports():
+        log.info("asking '%s' to reset subscriptions and tags" % cmd_port)
+        #send_rpc(context, cmd_port, cmd, **msg)
+        # TODO
 
     #
     # and now the job aggregators
     #
-    pass
+    jaggs = get_component_state({"component": "job_agg"})
+    for jobid, jcomp in jaggs.items():
+        if "outdated!" in jcomp:
+            remove_job_agg_instance(jobid)
+            # what if this process has crashed?
+    for j in job_list:
+        jobid = j["name"]
+        if jobid not in jaggs:
+            create_job_agg_instance(jobid)
+        # TODO: add tag
+        # TODO: ask ... to resubscribe
+
+
+
 
 
 def kill_components():
@@ -585,11 +639,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5556", action="store", help="RPC command port")
     ap.add_argument('-c', '--config', default="", action="store", help="configuration file")
-    ap.add_argument('-H', '--mongo-host', default="localhost:27017", action="store", help="MongoDB host:port")
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
     ap.add_argument('-S', '--state-file', default="agg_control.state", action="store", help="file to store state")
-    ap.add_argument('-u', '--mongo-user', default="", action="store", help="Mongo DB user name")
-    ap.add_argument('-p', '--mongo-passwd', default="", action="store", help="Mongo DB password")
     ap.add_argument('-k', '--kill', default=False, action="store_true", help="kill components that were left running")
     ap.add_argument('-v', '--verbose', type=int, default=0, action="store", help="verbosity")
     pargs = ap.parse_args()
@@ -606,7 +657,6 @@ if __name__ == "__main__":
 
     zmq_context = zmq.Context()
 
-
     rpc = RPCThread(zmq_context, listen=pargs.cmd_port)
     rpc.start()
 
@@ -616,6 +666,12 @@ if __name__ == "__main__":
 
     me_addr = zmq_own_addr_for_uri("tcp://8.8.8.8:10000")
     me_rpc = "tcp://%s:%d" % (me_addr, rpc.port)
+
+    if not pargs.kill:
+        # connect to the top level database. the one which stores the job lists
+        dbconf = config["database"]
+        store = MongoDBJobList(host_name=dbconf["dbhost"], port=None, db_name=dbconf["dbname"],
+                               username=dbconf["user"], password=dbconf["password"])
 
 
     # TODO: add smart starter of components: check/load saved state, query a resend, kill and restart if no update?
@@ -631,23 +687,32 @@ if __name__ == "__main__":
 
     #
     # start missing components
-    # TODO: loop and restart...?
-    # TODO: deal with job aggs
+
     #
     if res is not None:
         log.info("Restarting: waiting 70 seconds for state messages to come in ...")
         time.sleep(70)
+    job_list = store.find()
     start_missing_components()
 
-    rpc.register_rpc("add_tag", lambda x: relay_to_pubs(zmq_context, "add_tag", x), post=save_state_post)
-    rpc.register_rpc("remove_tag", lambda x: relay_to_pubs(zmq_context, "remove_tag", x), post=save_state_post)
-    rpc.register_rpc("reset_tags", lambda x: relay_to_pubs(zmq_context, "reset_tags", x), post=save_state_post)
+    rpc.register_rpc("add_tag", lambda x: relay_to_collectors(zmq_context, "add_tag", x), post=save_state_post)
+    rpc.register_rpc("remove_tag", lambda x: relay_to_collectors(zmq_context, "remove_tag", x), post=save_state_post)
+    rpc.register_rpc("reset_tags", lambda x: relay_to_collectors(zmq_context, "reset_tags", x), post=save_state_post)
     #rpc.register_rpc("show_tags", local_show_tags)
+
+
+    # TODO: deal with job aggs
+    job_list = store.find()
+
+
 
     #time.sleep(30)
     #kill_component("collector", "universe")
     #kill_component("data_store", "universe")
 
+    #
+    # TODO: loop and restart failed components...?
+    #
     while True:
         try:
             rpc.join(0.1)

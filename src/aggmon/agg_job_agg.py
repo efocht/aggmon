@@ -185,23 +185,36 @@ if __name__ == "__main__":
         sys.exit(1)
     jagg.start()
 
-
     # Socket to receive messages on
     receiver = context.socket(zmq.PULL)
     receiver.setsockopt(zmq.RCVHWM, 40000)
     recv_port = zmq_socket_bind_range(receiver, pargs.listen)
     assert(recv_port is not None)
 
+
+    def subscribe_collectors(__msg):
+        for msgb in pargs.msgbus:
+            log.info( "subscribing to msgs of job %s at %s" % (pargs.jobid, msgb) )
+            me_addr = zmq_own_addr_for_uri(msgb)
+            send_rpc(context, msgb, "subscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port),
+                     J=pargs.jobid)
+
+
+    def unsubscribe_and_quit(__msg):
+        # subscribe to message bus
+        for msgb in pargs.msgbus:
+            log.info( "unsubscribing jobid %s from %s" % (pargs.jobid, msgb) )
+            me_addr = zmq_own_addr_for_uri(msgb)
+            send_rpc(context, msgb, "unsubscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port))
+        os._exit(0)
+
     rpc = RPCThread(context, listen=pargs.cmd_port)
     rpc.start()
-    rpc.register_rpc("quit", lambda x: os._exit(0))
+    rpc.register_rpc("quit", unsubscribe_and_quit)
+    rpc.register_rpc("resubscribe", subscribe_collectors)
 
     # subscribe to message bus
-    for msgb in pargs.msgbus:
-        log.info( "subscribing to msgs of job %s at %s" % (pargs.jobid, msgb) )
-        me_addr = zmq_own_addr_for_uri(msgb)
-        send_rpc(context, msgb, "subscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port),
-                 J=pargs.jobid)
+    subscribe_collectors(None)
 
     component = None
     if len(pargs.dispatcher) > 0:

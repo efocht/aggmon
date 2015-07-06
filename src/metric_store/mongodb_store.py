@@ -115,14 +115,6 @@ class MongoDBJobList(MongoDBStore):
             raise Exception("Failed to retrieve Job list, %s" % str( e ))
         return jobs
 
-    def getList( self ):
-        jobs = None
-        try:
-            jobs = self.__col_job_list.find()
-        except Exception, e:
-            raise Exception("Failed to retrieve Job list, %s" % str( e ))
-        return jobs
-
 
 class MongoDBMetricStore(MongoDBStore):
     """

@@ -177,15 +177,28 @@ if __name__ == "__main__":
     recv_port = zmq_socket_bind_range(receiver, pargs.listen)
     assert( recv_port is not None)
 
+    def subscribe_collectors(__msg):
+        for msgb in pargs.msgbus:
+            log.info( "subscribing to all msgs at '%s'" % msgb )
+            me_addr = zmq_own_addr_for_uri(msgb)
+            send_rpc(context, msgb, "subscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port))
+
+
+    def unsubscribe_and_quit(__msg):
+        for msgb in pargs.msgbus:
+            log.info( "unsubscribing from '%s'" % msgb )
+            me_addr = zmq_own_addr_for_uri(msgb)
+            send_rpc(context, msgb, "unsubscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port))
+        os._exit(0)
+
+
     rpc = RPCThread(context, listen=pargs.cmd_port)
     rpc.start()
-    rpc.register_rpc("quit", lambda x: os._exit(0))
+    rpc.register_rpc("quit", unsubscribe_and_quit)
+    rpc.register_rpc("resubscribe", subscribe_collectors)
 
     # subscribe to message bus
-    for msgb in pargs.msgbus:
-        log.info( "subscribing to all msgs at '%s'" % msgb )
-        me_addr = zmq_own_addr_for_uri(msgb)
-        send_rpc(context, msgb, "subscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port))
+    subscribe_collectors(None)
 
     if len(pargs.dispatcher) > 0:
         me_addr = zmq_own_addr_for_uri(pargs.dispatcher)
