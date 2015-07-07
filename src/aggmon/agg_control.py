@@ -574,7 +574,7 @@ def make_timers_and_save(msg):
 
 
 def start_missing_components():
-    global job_list
+    global job_list, zmq_context
 
     for group_path in config["groups"]:
         group = group_name(group_path)
@@ -594,12 +594,13 @@ def start_missing_components():
             start_component("data_store", group_path, statefile="/tmp/state.data_store_%s" % group,
                             dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
 
-    # TODO: fixup subscriptions on collectors
+    #
+    # fixup subscriptions on collectors
     #
     for cmd_port in get_all_pubs_cmd_ports():
         log.info("asking '%s' to reset subscriptions and tags" % cmd_port)
-        #send_rpc(context, cmd_port, cmd, **msg)
-        # TODO
+        send_rpc(zmq_context, cmd_port, "reset_tags")
+        send_rpc(zmq_context, cmd_port, "reset_subs")
 
     #
     # and now the job aggregators
@@ -612,11 +613,29 @@ def start_missing_components():
     for j in job_list:
         jobid = j["name"]
         if jobid not in jaggs:
+            # these will subscribe
             create_job_agg_instance(jobid)
-        # TODO: add tag
-        # TODO: ask ... to resubscribe
+        else:
+            # ask these ones to re-subscribe
+            cmd_port = jaggs[jobid]["cmd_port"]
+            send_rpc(zmq_context, cmd_port, "resubscribe")
 
+        # add tagging for running jobs
+        nodes = j["cnodes"]
+        if len(nodes) == 1:
+            nodesmatch = nodes[0]
+        else:
+            nodesmatch = "RE:^(%s)$" % "|".join(nodes)
+        for cmd_port in get_all_pubs_cmd_ports():
+            send_rpc(zmq_context, cmd_port, "add_tag", TAG_KEY="J", TAG_VALUE=jobid, J=nodesmatch)
 
+    #
+    # ask data stores to resubscribe
+    #
+    stores = get_component_state({"component": "data_store"})
+    for skey, state in stores.items():
+        cmd_port = state["cmd_port"]
+        send_rpc(zmq_context, cmd_port, "resubscribe")
 
 
 

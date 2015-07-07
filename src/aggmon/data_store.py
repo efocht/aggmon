@@ -204,7 +204,7 @@ if __name__ == "__main__":
         me_addr = zmq_own_addr_for_uri(pargs.dispatcher)
         me_listen = "tcp://%s:%d" % (me_addr, recv_port)
         me_rpc = "tcp://%s:%d" % (me_addr, rpc.port)
-        state = get_kwds(component="mongo_store", cmd_port=me_rpc, listen=me_listen, group=pargs.group,
+        state = get_kwds(component="data_store", cmd_port=me_rpc, listen=me_listen, group=pargs.group,
                          host=zmq_own_addr_for_tgt('8.8.8.8'), pid=os.getpid(), started=time.time())
         component = ComponentState(context, pargs.dispatcher, state=state)
 

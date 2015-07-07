@@ -65,6 +65,10 @@ class AggPubMatch(object):
     def show_subscriptions(self, msg, *args, **kwds):
         return self.subs
 
+    def reset_subscriptions(self, msg):
+        for target in self.subs.keys():
+            self.unsubscribe({"TARGET": target})
+
     def subscribe(self, msg, *args, **kwds):
         if "TARGET" not in msg:
             raise Exception("No TARGET in subscription command message!")
@@ -353,6 +357,7 @@ if __name__ == "__main__":
     rpc.register_rpc("subscribe", pubsub.subscribe, post=save_subs_tags)
     rpc.register_rpc("unsubscribe", pubsub.unsubscribe, post=save_subs_tags)
     rpc.register_rpc("show_subs", pubsub.show_subscriptions)
+    rpc.register_rpc("reset_subs", pubsub.reset_subscriptions, post=save_subs_tags)
     rpc.register_rpc("add_tag", tagger.add_tag, post=save_subs_tags)
     rpc.register_rpc("remove_tag", tagger.remove_tag, post=save_subs_tags)
     rpc.register_rpc("reset_tags", tagger.reset_tags, post=save_subs_tags)
