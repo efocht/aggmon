@@ -296,7 +296,7 @@ def get_component_state(msg):
         return component_state
     component = msg["component"]
     if component not in component_state:
-        return None
+        return {}
     key = component_key(config["services"][component]["component_key"], msg)
     if len(key) > 0:
         if key in component_state[component]:
@@ -533,10 +533,6 @@ def load_component_state(name, mode="keep"):
             component_state[component][ckey]["outdated!"] = True
             request_resend(cstate)
             time.sleep(0.05)
-    # create timers for running aggregators
-    if "job_agg" in loaded_state:
-        for jobid, jstate in loaded_state["job_agg"].items():
-            make_timers(jobid)
     return True
 
 
@@ -573,7 +569,7 @@ def make_timers_and_save(msg):
     save_state_post(msg)
 
 
-def start_missing_components():
+def start_fixups(program_restart=False):
     global job_list, zmq_context
 
     for group_path in config["groups"]:
@@ -594,16 +590,19 @@ def start_missing_components():
             start_component("data_store", group_path, statefile="/tmp/state.data_store_%s" % group,
                             dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
 
-    #
-    # fixup subscriptions on collectors
-    #
-    for cmd_port in get_all_pubs_cmd_ports():
-        log.info("asking '%s' to reset subscriptions and tags" % cmd_port)
-        send_rpc(zmq_context, cmd_port, "reset_tags")
-        send_rpc(zmq_context, cmd_port, "reset_subs")
+    if program_restart:
+        #
+        # fixup subscriptions on collectors
+        #
+        for cmd_port in get_all_pubs_cmd_ports():
+            log.info("asking '%s' to reset subscriptions and tags" % cmd_port)
+            send_rpc(zmq_context, cmd_port, "reset_tags")
+            send_rpc(zmq_context, cmd_port, "reset_subs")
 
     #
     # and now the job aggregators
+    #
+    # TODO: do this more smartly, such that the entire function can be used for restarting components that failed.
     #
     jaggs = get_component_state({"component": "job_agg"})
     for jobid, jcomp in jaggs.items():
@@ -613,12 +612,16 @@ def start_missing_components():
     for j in job_list:
         jobid = j["name"]
         if jobid not in jaggs:
-            # these will subscribe
+            # start aggregators for new jobs
+            # these will subscribe themselves to collectors
             create_job_agg_instance(jobid)
         else:
+            # old job_aggs
             # ask these ones to re-subscribe
             cmd_port = jaggs[jobid]["cmd_port"]
             send_rpc(zmq_context, cmd_port, "resubscribe")
+            # create timers for already running job_aggs
+            make_timers(jobid)
 
         # add tagging for running jobs
         nodes = j["cnodes"]
@@ -629,14 +632,22 @@ def start_missing_components():
         for cmd_port in get_all_pubs_cmd_ports():
             send_rpc(zmq_context, cmd_port, "add_tag", TAG_KEY="J", TAG_VALUE=jobid, J=nodesmatch)
 
-    #
-    # ask data stores to resubscribe
-    #
-    stores = get_component_state({"component": "data_store"})
-    for skey, state in stores.items():
-        cmd_port = state["cmd_port"]
-        send_rpc(zmq_context, cmd_port, "resubscribe")
+    if program_restart:
+        #
+        # ask data stores to resubscribe
+        #
+        stores = get_component_state({"component": "data_store"})
+        for skey, state in stores.items():
+            cmd_port = state["cmd_port"]
+            send_rpc(zmq_context, cmd_port, "resubscribe")
 
+
+# TODO
+def check_components_state():
+    # check if all components that should be running are running
+    # deal with those which have restarted ...
+    # deal with those which have died ...
+    pass
 
 
 def kill_components():
@@ -706,23 +717,17 @@ if __name__ == "__main__":
 
     #
     # start missing components
-
     #
     if res is not None:
         log.info("Restarting: waiting 70 seconds for state messages to come in ...")
         time.sleep(70)
     job_list = store.find()
-    start_missing_components()
+    start_fixups(program_restart=((res is not None) and True or False))
 
     rpc.register_rpc("add_tag", lambda x: relay_to_collectors(zmq_context, "add_tag", x), post=save_state_post)
     rpc.register_rpc("remove_tag", lambda x: relay_to_collectors(zmq_context, "remove_tag", x), post=save_state_post)
     rpc.register_rpc("reset_tags", lambda x: relay_to_collectors(zmq_context, "reset_tags", x), post=save_state_post)
     #rpc.register_rpc("show_tags", local_show_tags)
-
-
-    # TODO: deal with job aggs
-    job_list = store.find()
-
 
 
     #time.sleep(30)
