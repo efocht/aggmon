@@ -7,7 +7,7 @@ config:
     services:
         collector:
             cmdport_range: 5100-5199
-            listen_port_range: 5262,
+            listen_port_range: 5262
             logfile: /tmp/%(service)s_%(group)s.log
         data_store:
             cmdport_range: 5100-5199
