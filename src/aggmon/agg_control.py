@@ -43,137 +43,6 @@ Job aggregators will (for now) receive periodic requests for aggregation which a
 push to them. The configuration, which metrics shall be aggregated and how, must be still designed.
 
 """
-
-
-def load_config( config_file ):
-
-    global config, aggregate
-
-    config = {
-        "groups": {
-        #     "/universe": {
-        #         "job_agg_nodes": ["localhost"],
-        #         "data_store_nodes" : ["localhost"],
-        #         "collector_nodes" : ["localhost"]
-        #     }
-        },
-        "services": {
-            "collector": {
-                "cwd": os.getcwd(),
-                "cmd": "python agg_collector.py --cmd-port %(cmdport)s --listen %(listen)s " + \
-                "--group %(group_path)s --state-file %(statefile)s --dispatcher %(dispatcher)s",
-                "cmdport_range": "5100-5199",
-                "component_key": ["group", "host"],
-                "listen_port_range": "5262",
-                "logfile": "/tmp/%(service)s_%(group)s.log"
-            },
-            "data_store": {
-                "cwd": os.getcwd(),
-                "cmd": "python data_store.py --cmd-port %(cmdport)s --listen %(listen)s " + \
-                "--dbname \"%(dbname)s\" --host \"%(dbhost)s\"" + \
-                "--group %(group_path)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
-                "cmdport_range": "5100-5199",
-                "component_key":  ["group", "host"],
-                "listen_port_range": "5200-5299",
-                "logfile": "/tmp/%(service)s_%(group)s.log"
-            },
-            "job_agg": {
-                "cwd": os.getcwd(),
-                "cmd": "python agg_job_agg.py --cmd-port %(cmdport)s --listen %(listen)s " + \
-                "--jobid %(jobid)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
-                "cmdport_range": "5000-5999",
-                "component_key":  ["jobid"],
-                "listen_port_range": "5300-5999",
-                "logfile": "/tmp/%(service)s_%(jobid)s.log"
-            }
-        },
-        "database": {
-            "dbname": "metricdb",
-            "dbhost": "localhost:27017",
-            "user": "",
-            "password": ""
-        },
-        "global": {
-            "local_cmd"  : "cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &",
-            "remote_cmd" : "ssh %(host)s \"cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &\"",
-            "remote_kill": "ssh %(host)s kill %(pid)d"
-        }
-    }
-
-    # cmd : "agg"
-    # metric : metric that should be aggregated
-    # agg_metric : aggregated metric name
-    # push_target : where to push the aggregated metric to. Can be the agg_collector
-    #               of the own group or one on a higher level or the mongo store.
-    # agg_type : aggregation type, i.e. min, max, avg, sum, worst, quant10
-    # ttl : (optional) time to live for metrics, should filter out old/expired metrics
-    # args ... : space for further aggregator specific arguments
-
-    import yaml
-
-    files = []
-    if os.path.isdir( config_file ):
-        for f in os.listdir( config_file ):
-            path = os.path.join( config_file, f )
-            if os.path.isfile( path ):
-                files.append( path )
-    else:
-        files = ( config_file, )
-
-    templates = {}
-    aggregate = []
-
-    for f in files:
-        result = yaml.safe_load( open( f ) )
-        cf = result.get( "config", None )
-        if cf is not None:
-            groups = cf.get( "groups", None )
-            if isinstance( groups, dict ):
-                config["groups"].update( groups )
-            services = cf.get( "services", None )
-            if isinstance( services, dict ):
-                obj = services.get( "collector", None )
-                if isinstance( obj, dict ):
-                    config["services"]["collector"].update( obj )
-                obj = services.get( "collector", None )
-                if isinstance( obj, dict ):
-                    config["services"]["data_store"].update( obj )
-                obj = services.get( "collector", None )
-                if isinstance( obj, dict ):
-                    config["services"]["job_agg"].update( obj )
-            database = cf.get( "database", None )
-            if isinstance( database, dict ):
-                config["database"].update( database )
-            glob = cf.get( "global", None )
-            if isinstance( glob, dict ):
-                config["global"].update( glob )
-
-        tpl = result.get( "agg-templates", None )
-        if isinstance( tpl, dict ):
-            templates.update( tpl )
-
-        agg = result.get( "agg", None )
-        if isinstance( agg, list ):
-            for a in agg:
-                if isinstance( a, dict ):
-                    aggregate.append( a )
-
-    for agg in aggregate:
-        tpl_names = agg.get( "template", None )
-        if tpl_names is None:
-            continue
-        del agg["template"]
-        if not isinstance( tpl_names, list ):
-            tpl_names = ( tpl_names, )
-        orig_attrs = agg.copy()
-        agg.clear()
-        for tpl_name in tpl_names:
-            tpl = templates.get( tpl_name, None )
-            if tpl is None:
-                raise Exception( "Template '%s' used in config file '%s' is not known." % (  tpl_name, f ) )
-            agg.update( tpl )
-        agg.update( orig_attrs )
-
 # hierarchy: component -> group/host
 component_state = {}
 component_start_cb = {}
@@ -190,6 +59,142 @@ zmq_context = None
 
 # list of running jobs, as fresh as the mongodb collection
 job_list = []
+
+##
+# default configuration data
+##
+config = {
+    "groups": {
+    #     "/universe": {
+    #         "job_agg_nodes": ["localhost"],
+    #         "data_store_nodes" : ["localhost"],
+    #         "collector_nodes" : ["localhost"]
+    #     }
+    },
+    "services": {
+        "collector": {
+            "cwd": os.getcwd(),
+            "cmd": "python agg_collector.py --cmd-port %(cmdport)s --listen %(listen)s " + \
+            "--group %(group_path)s --state-file %(statefile)s --dispatcher %(dispatcher)s",
+            "cmdport_range": "5100-5199",
+            "component_key": ["group", "host"],
+            "listen_port_range": "5262",
+            "logfile": "/tmp/%(service)s_%(group)s.log"
+        },
+        "data_store": {
+            "cwd": os.getcwd(),
+            "cmd": "python data_store.py --cmd-port %(cmdport)s --listen %(listen)s " + \
+            "--dbname \"%(dbname)s\" --host \"%(dbhost)s\" " + \
+            "--group %(group_path)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
+            "cmdport_range": "5100-5199",
+            "component_key":  ["group", "host"],
+            "listen_port_range": "5200-5299",
+            "logfile": "/tmp/%(service)s_%(group)s.log"
+        },
+        "job_agg": {
+            "cwd": os.getcwd(),
+            "cmd": "python agg_job_agg.py --cmd-port %(cmdport)s --listen %(listen)s " + \
+            "--jobid %(jobid)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
+            "cmdport_range": "5000-5999",
+            "component_key":  ["jobid"],
+            "listen_port_range": "5300-5999",
+            "logfile": "/tmp/%(service)s_%(jobid)s.log"
+        }
+    },
+    "database": {
+        "dbname": "metricdb",
+        "dbhost": "localhost:27017",
+        "user": "",
+        "password": ""
+    },
+    "global": {
+        "local_cmd"  : "cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &",
+        "remote_cmd" : "ssh %(host)s \"cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &\"",
+        "remote_kill": "ssh %(host)s kill %(pid)d"
+    }
+}
+
+# default aggregation config
+# cmd : "agg"
+# metric : metric that should be aggregated
+# agg_metric : aggregated metric name
+# push_target : where to push the aggregated metric to. Can be the agg_collector
+#               of the own group or one on a higher level or the mongo store.
+# agg_type : aggregation type, i.e. min, max, avg, sum, worst, quant10
+# ttl : (optional) time to live for metrics, should filter out old/expired metrics
+# args ... : space for further aggregator specific arguments
+aggregate = {}
+
+
+def load_config( config_file ):
+
+    global config, aggregate
+
+    import yaml
+
+    files = []
+    if os.path.isdir(config_file):
+        for f in os.listdir(config_file):
+            path = os.path.join(config_file, f)
+            if os.path.isfile(path):
+                files.append(path)
+    else:
+        files = (config_file,)
+
+    templates = {}
+    aggregate = []
+
+    for f in files:
+        result = yaml.safe_load(open(f))
+        cf = result.get("config", None)
+        if cf is not None:
+            groups = cf.get("groups", None)
+            if isinstance(groups, dict):
+                config["groups"].update(groups)
+            services = cf.get("services", None)
+            if isinstance(services, dict):
+                obj = services.get("collector", None)
+                if isinstance(obj, dict):
+                    config["services"]["collector"].update(obj)
+                obj = services.get("data_store", None)
+                if isinstance(obj, dict):
+                    config["services"]["data_store"].update(obj)
+                obj = services.get("job_agg", None)
+                if isinstance(obj, dict):
+                    config["services"]["job_agg"].update(obj)
+            database = cf.get("database", None)
+            if isinstance(database, dict):
+                config["database"].update(database)
+            glob = cf.get("global", None)
+            if isinstance(glob, dict):
+                config["global"].update(glob)
+
+        tpl = result.get("agg-templates", None)
+        if isinstance(tpl, dict):
+            templates.update(tpl)
+
+        agg = result.get("agg", None)
+        if isinstance(agg, list):
+            for a in agg:
+                if isinstance(a, dict):
+                    aggregate.append(a)
+
+    for agg in aggregate:
+        tpl_names = agg.get("template", None)
+        if tpl_names is None:
+            continue
+        del agg["template"]
+        if not isinstance(tpl_names, list):
+            tpl_names = (tpl_names,)
+        orig_attrs = agg.copy()
+        agg.clear()
+        for tpl_name in tpl_names:
+            tpl = templates.get(tpl_name, None)
+            if tpl is None:
+                raise Exception("Template '%s' used in config file '%s' is not known." % (tpl_name, f))
+            agg.update(tpl)
+        agg.update(orig_attrs)
+
 
 
 def component_key(keys, kwds):
@@ -311,6 +316,7 @@ def set_component_state(msg):
     global component_state, config, component_start_cb
 
     log.debug("set_component_state: msg %r" % msg)
+    #pdb.set_trace()
     if "component" not in msg:
         log.error("set_component_state message has no component!? %r" % msg)
         # TODO raise ComponentMsgError
@@ -323,7 +329,7 @@ def set_component_state(msg):
     started = None
     if key in component_state[component]:
         log.info("set_component_state: updating state for %s %s" % (component, key))
-        started = component[component][key]["started"]
+        started = component_state[component][key]["started"]
     else:
         log.info("set_component_state: setting state for %s %s" % (component, key))
     msg["last_update"] = time.time()
@@ -626,9 +632,11 @@ def start_fixups(program_restart=False):
     global job_list, zmq_context
 
     for group_path in config["groups"]:
+        print "group_path=", group_path
         group = group_name(group_path)
         pub = get_component_state({"component": "collector", "group": group_path})
-        if pub is None or "outdated!" in pub:
+        print "pub=", pub
+        if pub == {} or "outdated!" in pub:
             start_component("collector", group_path, statefile="/tmp/state.agg_collector_%s" % group,
                             dispatcher=me_rpc)
     while "collector" not in component_state:
@@ -639,7 +647,7 @@ def start_fixups(program_restart=False):
     for group_path in config["groups"]:
         group = group_name(group_path)
         mong = get_component_state({"component": "data_store", "group": group_path})
-        if mong is None or "outdated!" in mong:
+        if mong == {} or "outdated!" in mong:
             start_component("data_store", group_path, statefile="/tmp/state.data_store_%s" % group,
                             dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
 
@@ -725,7 +733,7 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser()
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5556", action="store", help="RPC command port")
-    ap.add_argument('-c', '--config', default="/etc/aggmon.d", action="store", help="configuration file")
+    ap.add_argument('-c', '--config', default="config.d", action="store", help="configuration directory")
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
     ap.add_argument('-S', '--state-file', default="agg_control.state", action="store", help="file to store state")
     ap.add_argument('-k', '--kill', default=False, action="store_true", help="kill components that were left running")
@@ -736,7 +744,7 @@ if __name__ == "__main__":
     FMT = "%(asctime)s %(levelname)-5.5s [%(threadName)s][%(filename)s:%(lineno)d] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
 
-    load_config( pargs.config )
+    load_config(pargs.config)
 
     state = []
     if len(pargs.state_file) > 0:
