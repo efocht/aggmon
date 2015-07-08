@@ -604,6 +604,10 @@ def start_fixups(program_restart=False):
     #
     # TODO: do this more smartly, such that the entire function can be used for restarting components that failed.
     #
+    # when we are not restarting, we just look after job_aggs that have failed and restart them
+    # when we are restarting, we need the whole shebang on new and finished jobs and retagging
+    # when collectors were restarted, subscribers need to resubscribe
+    #
     jaggs = get_component_state({"component": "job_agg"})
     for jobid, jcomp in jaggs.items():
         if "outdated!" in jcomp:
