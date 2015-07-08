@@ -1,0 +1,9 @@
+agg:
+    - template:        default
+      push_target:     "@TOP_STORE"
+      agg_metric_name: "%(metric)s_%(agg_type)s"
+      metrics:         [load_one]
+    - template:        [default,long-interval]
+      push_target:     "@TOP_STORE"
+      agg_metric_name: "%(metric)s_%(agg_type)s"
+      metrics:         [cpu_temp]
