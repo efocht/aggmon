@@ -92,7 +92,7 @@ class MongoDBStore(object):
 class MongoDBJobList(MongoDBStore):
     def __init__( self, col_name="job_list", **kwds ):
         MongoDBStore.__init__( self, **kwds )
-        self.__col_job_list = self._db[col_name]
+        self.__col_job_list = self.db[col_name]
         self.__col_job_list.ensure_index( [("name", ASCENDING)], unique=True )
 
     def addJob( self, metric ):
