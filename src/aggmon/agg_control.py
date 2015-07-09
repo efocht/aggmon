@@ -74,7 +74,7 @@ config = {
     "services": {
         "collector": {
             "cwd": os.getcwd(),
-            "cmd": "python agg_collector.py --cmd-port %(cmdport)s --listen %(listen)s " + \
+            "cmd": "python agg_collector.py --cmd-port %(cmdport)s --listen %(listen)s " +
             "--group %(group_path)s --state-file %(statefile)s --dispatcher %(dispatcher)s",
             "cmdport_range": "5100-5199",
             "component_key": ["group", "host"],
@@ -83,8 +83,8 @@ config = {
         },
         "data_store": {
             "cwd": os.getcwd(),
-            "cmd": "python data_store.py --cmd-port %(cmdport)s --listen %(listen)s " + \
-            "--dbname \"%(dbname)s\" --host \"%(dbhost)s\" " + \
+            "cmd": "python data_store.py --cmd-port %(cmdport)s --listen %(listen)s " +
+            "--dbname \"%(dbname)s\" --host \"%(dbhost)s\" " +
             "--group %(group_path)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
             "cmdport_range": "5100-5199",
             "component_key":  ["group", "host"],
@@ -93,7 +93,7 @@ config = {
         },
         "job_agg": {
             "cwd": os.getcwd(),
-            "cmd": "python agg_job_agg.py --cmd-port %(cmdport)s --listen %(listen)s " + \
+            "cmd": "python agg_job_agg.py --cmd-port %(cmdport)s --listen %(listen)s " +
             "--jobid %(jobid)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
             "cmdport_range": "5000-5999",
             "component_key":  ["jobid"],
@@ -226,8 +226,10 @@ try:
 except:
     subprocess.check_output = check_output
 
+
 def group_name(group):
     return group.lstrip("/").replace("/", "_")
+
 
 def start_component(service, group_path, __CALLBACK=None, __CALLBACK_ARGS=[], **kwds):
     global config, component_start_cb
@@ -411,7 +413,7 @@ def del_component_state(msg):
     return False
 
 
-def get_all_pubs_cmd_ports():
+def get_collectors_cmd_ports():
     cmd_ports = []
     pubs = get_component_state({"component": "collector"})
     if pubs is not None:
@@ -491,7 +493,7 @@ def create_job_agg_instance(jobid):
     jagg = get_component_state({"component": "job_agg", "jobid": jobid})
     if jagg is not None:
         return
-    msgbus_arr = ["--msgbus %s" % cmd_port for cmd_port in get_all_pubs_cmd_ports()]
+    msgbus_arr = ["--msgbus %s" % cmd_port for cmd_port in get_collectors_cmd_ports()]
     start_component("job_agg", "/universe", jobid=jobid, __CALLBACK=make_timers, __CALLBACK_ARGS=[jobid],
                     dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
     # wait for component to appear?
@@ -533,7 +535,7 @@ def relay_to_collectors(context, cmd, msg):
         pass
         #remove_all_job_agg_instances()
 
-    for cmd_port in get_all_pubs_cmd_ports():
+    for cmd_port in get_collectors_cmd_ports():
         log.info("relaying msg to '%s'" % cmd_port)
         send_rpc(context, cmd_port, cmd, **msg)
 
@@ -628,37 +630,67 @@ def make_timers_and_save(msg):
     save_state_post(msg)
 
 
-def start_fixups(program_restart=False):
+def component_wait_timeout(component, num, timeout=120):
+    """
+    Wait until 'num' components of the given type have appeared
+    or timeout was reached.
+    """
+    tstart = time.time()
+
+    while component not in component_state or len(component_state[component].keys()) < num:
+        time.sleep(0.1)
+        if time.time() - tstart > timeout:
+            return False
+    return True
+
+
+def start_fixups(program_restart=False, program_start=False):
+    """
+
+    -
+
+    :param program_restart:
+    :return: True if successful, False otherwise
+    """
+
+
     global job_list, zmq_context
 
+    num_collectors = 0
+    num_collectors_started = 0
     for group_path in config["groups"]:
-        print "group_path=", group_path
         group = group_name(group_path)
         pub = get_component_state({"component": "collector", "group": group_path})
-        print "pub=", pub
         if pub == {} or "outdated!" in pub:
+            if "outdated!" in pub:
+                del_component_state({"component": "collector", "group": group_path})
             start_component("collector", group_path, statefile="/tmp/state.agg_collector_%s" % group,
                             dispatcher=me_rpc)
-    while "collector" not in component_state:
-        time.sleep(0.1)
-    time.sleep(2)
+            num_collectors_started += 1
+        num_collectors += 1
 
-    msgbus_arr = ["--msgbus %s" % cmd_port for cmd_port in get_all_pubs_cmd_ports()]
-    for group_path in config["groups"]:
-        group = group_name(group_path)
-        mong = get_component_state({"component": "data_store", "group": group_path})
-        if mong == {} or "outdated!" in mong:
-            start_component("data_store", group_path, statefile="/tmp/state.data_store_%s" % group,
-                            dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
+    if not component_wait_timeout("collector", num_collectors, timeout=180):
+        return False, "timeout when waiting for collectors startup!"
 
     if program_restart:
         #
         # fixup subscriptions on collectors
         #
-        for cmd_port in get_all_pubs_cmd_ports():
+        for cmd_port in get_collectors_cmd_ports():
             log.info("asking '%s' to reset subscriptions and tags" % cmd_port)
             send_rpc(zmq_context, cmd_port, "reset_tags")
             send_rpc(zmq_context, cmd_port, "reset_subs")
+
+    msgbus_arr = ["--msgbus %s" % cmd_port for cmd_port in get_collectors_cmd_ports()]
+    for group_path in config["groups"]:
+        group = group_name(group_path)
+        mong = get_component_state({"component": "data_store", "group": group_path})
+        if mong == {} or "outdated!" in mong:
+            if "outdated!" in pub:
+                del_component_state({"component": "data_store", "group": group_path})
+            start_component("data_store", group_path, statefile="/tmp/state.data_store_%s" % group,
+                            dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
+
 
     #
     # and now the job aggregators
@@ -671,33 +703,35 @@ def start_fixups(program_restart=False):
     #
     jaggs = get_component_state({"component": "job_agg"})
     for jobid, jcomp in jaggs.items():
-        if "outdated!" in jcomp:
+        if "outdated!" in jcomp or "exited!" in jcomp:
             remove_job_agg_instance(jobid)
             # what if this process has crashed?
-    for j in job_list:
-        jobid = j["name"]
-        if jobid not in jaggs:
-            # start aggregators for new jobs
-            # these will subscribe themselves to collectors
-            create_job_agg_instance(jobid)
-        else:
-            # old job_aggs
-            # ask these ones to re-subscribe
-            cmd_port = jaggs[jobid]["cmd_port"]
-            send_rpc(zmq_context, cmd_port, "resubscribe")
-            # create timers for already running job_aggs
-            make_timers(jobid)
 
-        # add tagging for running jobs
-        nodes = j["cnodes"]
-        if len(nodes) == 1:
-            nodesmatch = nodes[0]
-        else:
-            nodesmatch = "RE:^(%s)$" % "|".join(nodes)
-        for cmd_port in get_all_pubs_cmd_ports():
-            send_rpc(zmq_context, cmd_port, "add_tag", TAG_KEY="J", TAG_VALUE=jobid, J=nodesmatch)
+    if program_start or program_restart:
+        for j in job_list:
+            jobid = j["name"]
+            if jobid not in jaggs:
+                # start aggregators for new jobs
+                # these will subscribe themselves to collectors
+                create_job_agg_instance(jobid)
+            else:
+                # old job_aggs
+                # ask these ones to re-subscribe
+                cmd_port = jaggs[jobid]["cmd_port"]
+                send_rpc(zmq_context, cmd_port, "resubscribe")
+                # create timers for already running job_aggs
+                make_timers(jobid)
 
-    if program_restart:
+            # add tagging for running jobs
+            nodes = j["cnodes"]
+            if len(nodes) == 1:
+                nodesmatch = nodes[0]
+            else:
+                nodesmatch = "RE:^(%s)$" % "|".join(nodes)
+            for cmd_port in get_collectors_cmd_ports():
+                send_rpc(zmq_context, cmd_port, "add_tag", TAG_KEY="J", TAG_VALUE=jobid, J=nodesmatch)
+
+    if num_collectors_started > 0:
         #
         # ask data stores to resubscribe
         #
@@ -707,12 +741,6 @@ def start_fixups(program_restart=False):
             send_rpc(zmq_context, cmd_port, "resubscribe")
 
 
-# TODO
-def check_components_state():
-    # check if all components that should be running are running
-    # deal with those which have restarted ...
-    # deal with those which have died ...
-    pass
 
 
 def kill_components():
@@ -788,7 +816,8 @@ if __name__ == "__main__":
         log.info("Restarting: waiting 70 seconds for state messages to come in ...")
         time.sleep(70)
     job_list = store.find()
-    start_fixups(program_restart=((res is not None) and True or False))
+    start_fixups(program_restart=((res is not None) and True or False),
+                 program_start=((res is None) and True or False))
 
     rpc.register_rpc("add_tag", lambda x: relay_to_collectors(zmq_context, "add_tag", x), post=save_state_post)
     rpc.register_rpc("remove_tag", lambda x: relay_to_collectors(zmq_context, "remove_tag", x), post=save_state_post)
@@ -812,5 +841,3 @@ if __name__ == "__main__":
             log.error("main thread exception: %r" % e)
             break
     print "THE END"
-
-
