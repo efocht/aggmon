@@ -194,15 +194,14 @@ def is_file_open( pid, file_name ):
     if not os.access( dir, os.R_OK | os.X_OK ):
         log.error( "no permissions to access: %s! Terminating..." % dir )
         sys.exit( 1 )
-    for fds in os.listdir( dir ):
-        for fd in fds:
-            full_name = os.path.join( dir, fd )
-            try:
-                file = os.readlink( full_name )
-                if file == file_name:
-                    return True
-            except:
-                pass
+    for fd in os.listdir( dir ):
+        full_name = os.path.join( dir, fd )
+        try:
+            file = os.readlink( full_name )
+            if file == file_name:
+                return True
+        except:
+            pass
     return False
 
 def tail( pid, file_name ):
