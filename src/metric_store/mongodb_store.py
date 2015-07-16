@@ -17,7 +17,7 @@ from pymongo import MongoClient, ASCENDING
 from pymongo.son_manipulator import AutoReference, NamespaceInjector
 from bson.code import Code
 
-__all__ = ["JMetric", "NMetric", "TSLOGRecord", "MongoDBMetricStore", "MongoDBJobList"]
+__all__ = ["JMetric", "NMetric", "TSLOGRecord", "MongoDBMetricStore", "MongoDBJobList", 'MongoDBJobStore']
 
 # Constants
 MAX_RECORDS = 1500
@@ -83,10 +83,13 @@ class MongoDBStore(object):
         self.db = self._client[db_name]
         if username and password:
             self.db.authenticate(username, password, mechanism='MONGODB-CR')
-        self.db.add_son_manipulator( NamespaceInjector() )
-        self.db.add_son_manipulator( AutoReference( self.db ) )
+#        self.db.add_son_manipulator( NamespaceInjector() )
+#        self.db.add_son_manipulator( AutoReference( self.db ) )
 
-
+    @staticmethod
+    def group_suffix( group ):
+        suffix = group.lstrip("/").replace("/", "_")
+        return suffix
 
 
 class MongoDBJobList(MongoDBStore):
@@ -125,7 +128,7 @@ class MongoDBMetricStore(MongoDBStore):
         self._col_md = self.db[md_col]
         self._col_md_name = md_col
         self._col_val_base = val_col
-        self._col_val_name = val_col + "_" + MongoDBMetricStore.group_suffix( group )
+        self._col_val_name = val_col + "_" + MongoDBStore.group_suffix( group )
         self._col_val = self.db[self._col_val_name]
         self._val_ttl = val_ttl
         try:
@@ -139,12 +142,6 @@ class MongoDBMetricStore(MongoDBStore):
             self._col_val.ensure_index( [("J", ASCENDING)], unique=False, background=True )
         except Exception, e:
             raise Exception( "Failed to ensure index: %s" % str( e ) )
-
-
-    @staticmethod
-    def group_suffix( group ):
-        suffix = group.lstrip("/").replace("/", "_")
-        return suffix
 
 
     def insert_md( self, md ):
@@ -278,6 +275,41 @@ class MongoDBMetricStore(MongoDBStore):
             };
         """
         return self.__db.system_js.agg( Code( pipeline ), Code( finalize ) )
+
+
+
+class MongoDBJobStore(MongoDBStore):
+    """
+    """
+    def __init__( self, group="/universe", col="job", val_ttl=3600*24*180, **kwds ):
+        MongoDBStore.__init__( self, **kwds )
+        self._group = group
+        self._col_base = col
+        self._col_name = col + "_" + MongoDBMetricStore.group_suffix( group )
+        self._col = self.db[self._col_name]
+        self._col_ttl = val_ttl
+        try:
+            # indices for job data
+            self._col.ensure_index( [("name", ASCENDING), ("value", ASCENDING)], unique=True )
+            #self._col.ensure_index( [("name", ASCENDING), ("value", ASCENDING)], unique=True, background=True, expireAfterSeconds=self._col_ttl )
+        except Exception, e:
+            raise Exception( "Failed to ensure index: %s" % str( e ) )
+
+    def insert_job(self, metric):
+        # make sure the time has proper format such that TTL will expire it eventually
+        metric["time"] = datetime.datetime.fromtimestamp( metric["time"] )
+        return self._col.update( {metric["name"], metric["value"]}, metric, upsert=True )
+
+
+    def find_job( self, match=None, proj=None ):
+        return self._col.find( match, proj )
+
+
+    def drop_all( self ):
+        if self.db:
+            for col in self.db.collection_names():
+                if col == self._col_name: 
+                    self.db[col].drop()
 
 
 #
