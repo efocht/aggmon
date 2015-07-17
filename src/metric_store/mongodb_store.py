@@ -13,61 +13,21 @@
 import sys
 import time
 import datetime
-from pymongo import MongoClient, ASCENDING
+from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.son_manipulator import AutoReference, NamespaceInjector
 from bson.code import Code
 
-__all__ = ["JMetric", "NMetric", "TSLOGRecord", "MongoDBMetricStore", "MongoDBJobList", 'MongoDBJobStore']
+__all__ = ["JMetric", "NMetric", "TSLOGRecord", "MongoDBMetricStore", "MongoDBJobList", 'MongoDBJobStore', 'MongoDBStatusStore']
 
 # Constants
 MAX_RECORDS = 1500
 METRIC_TTL = 900
 
 
-class JMetric(dict):
-    """
-    Job metrics.
-    """
-    def __init__( self, **kwds ):
-        super(JMetric, self).__init__( **kwds )
-
-
-class NMetric(dict):
-    """
-    Nagios style metrics.
-    """
-    def __init__( self, **kwds ):
-        super(NMetric, self).__init__( **kwds )
-        ts_vals = {}
-        keys = self.keys()
-        if "ts_record" not in keys:
-            for i in ["time", "value", "output", "lastvalue", "lastchange"]:
-                if i in keys:
-                    ts_vals[i] = self[i]
-                    del self[i]
-            if ts_vals:
-                self["ts_record"] = TSLOGRecord( **ts_vals )
-        else:
-            self["ts_record"] = TSLOGRecord( **self["ts_record"] )
-        for i in ["host", "name"]:
-            assert i in keys, "NMetric requires to have %s!" % i
-
-
-class TSLOGRecord(dict):
-    def __init__( self, **kwds ):
-        super(TSLOGRecord, self).__init__( **kwds )
-        if "time" not in self.keys():
-            self["time"] = long( time.time() )
-        keys = self.keys()
-        for i in ["time", "value", "output"]:
-            assert i in keys, "TSLOGRecord requires to have %s!" % i
-        for i in ["time", "lastchange"]:
-            if i in keys:
-                self[i] = long( self[i] )
-
-
 class MongoDBStore(object):
     """
+    Base class for different types of metric storage in MongoDB database.
+
     host_name and port could be something like:
         "vmn1:27017"
         "vmn1", 27017
@@ -93,6 +53,11 @@ class MongoDBStore(object):
 
 
 class MongoDBJobList(MongoDBStore):
+    """
+    List of currently running Jobs.
+    """
+    """
+    """
     def __init__( self, col_name="job_list", **kwds ):
         MongoDBStore.__init__( self, **kwds )
         self.__col_job_list = self.db[col_name]
@@ -121,6 +86,7 @@ class MongoDBJobList(MongoDBStore):
 
 class MongoDBMetricStore(MongoDBStore):
     """
+    Numerical (Ganglia style) metrics
     """
     def __init__( self, group="/universe", md_col="metric_md", val_col="metric", val_ttl=3600*24*180, **kwds ):
         MongoDBStore.__init__( self, **kwds )
@@ -280,8 +246,9 @@ class MongoDBMetricStore(MongoDBStore):
 
 class MongoDBJobStore(MongoDBStore):
     """
+    Job metrics
     """
-    def __init__( self, group="/universe", col="job", val_ttl=3600*24*180, **kwds ):
+    def __init__( self, group="/universe", col="job", val_ttl=3600*24*360, **kwds ):
         MongoDBStore.__init__( self, **kwds )
         self._group = group
         self._col_base = col
@@ -293,15 +260,15 @@ class MongoDBJobStore(MongoDBStore):
             self._col.ensure_index( [("name", ASCENDING), ("value", ASCENDING)], unique=True )
             #self._col.ensure_index( [("name", ASCENDING), ("value", ASCENDING)], unique=True, background=True, expireAfterSeconds=self._col_ttl )
         except Exception, e:
-            raise Exception( "Failed to ensure index: %s" % str( e ) )
+            raise Exception( "Failed to ensure index for collection %s: %s" % (self._col, str( e )) )
 
-    def insert_job(self, metric):
+    def insert(self, metric):
         # make sure the time has proper format such that TTL will expire it eventually
         metric["time"] = datetime.datetime.fromtimestamp( metric["time"] )
         return self._col.update( {metric["name"], metric["value"]}, metric, upsert=True )
 
 
-    def find_job( self, match=None, proj=None ):
+    def find( self, match=None, proj=None ):
         return self._col.find( match, proj )
 
 
@@ -310,6 +277,42 @@ class MongoDBJobStore(MongoDBStore):
             for col in self.db.collection_names():
                 if col == self._col_name: 
                     self.db[col].drop()
+
+
+class MongoDBStatusStore(MongoDBStore):
+    """
+    Status (log style) metrics. Mainly originating from Nagios.
+    """
+    def __init__( self, group="/universe", col="status", val_ttl=3600*24*360, **kwds ):
+        MongoDBStore.__init__( self, **kwds )
+        self._group = group
+        self._col_base = col
+        self._col_name = col + "_" + MongoDBMetricStore.group_suffix( group )
+        self._col = self.db[self._col_name]
+        self._col_ttl = val_ttl
+        try:
+            # indices for status data
+            self._col.ensure_index( [("name", ASCENDING), ("time", DESCENDING), ("host", ASCENDING)], unique=True )
+            #self._col.ensure_index( [("name", ASCENDING), ("time", DESCENDING), ("host", ASCENDING)], unique=True, background=True, expireAfterSeconds=self._col_ttl )
+        except Exception, e:
+            raise Exception( "Failed to ensure index for collection %s: %s" % (self._col, str( e )) )
+
+    def insert(self, metric):
+        # make sure the time has proper format such that TTL will expire it eventually
+        metric["time"] = datetime.datetime.fromtimestamp( metric["time"] )
+        return self._col.update( {metric["name"], metric["host"], metric["time"]}, metric, upsert=True )
+
+
+    def find( self, match=None, proj=None ):
+        return self._col.find( match, proj )
+
+
+    def drop_all( self ):
+        if self.db:
+            for col in self.db.collection_names():
+                if col == self._col_name:
+                    self.db[col].drop()
+
 
 
 #
