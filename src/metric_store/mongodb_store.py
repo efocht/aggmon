@@ -17,7 +17,7 @@ from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.son_manipulator import AutoReference, NamespaceInjector
 from bson.code import Code
 
-__all__ = ["JMetric", "NMetric", "TSLOGRecord", "MongoDBMetricStore", "MongoDBJobList", 'MongoDBJobStore', 'MongoDBStatusStore']
+__all__ = ["MongoDBMetricStore", "MongoDBJobList", "MongoDBJobStore", "MongoDBStatusStore"]
 
 # Constants
 MAX_RECORDS = 1500
@@ -265,7 +265,7 @@ class MongoDBJobStore(MongoDBStore):
     def insert(self, metric):
         # make sure the time has proper format such that TTL will expire it eventually
         metric["time"] = datetime.datetime.fromtimestamp( metric["time"] )
-        return self._col.update( {metric["name"], metric["value"]}, metric, upsert=True )
+        return self._col.update( {"name": metric["name"], "value": metric["value"]}, metric, upsert=True )
 
 
     def find( self, match=None, proj=None ):
@@ -300,7 +300,7 @@ class MongoDBStatusStore(MongoDBStore):
     def insert(self, metric):
         # make sure the time has proper format such that TTL will expire it eventually
         metric["time"] = datetime.datetime.fromtimestamp( metric["time"] )
-        return self._col.update( {metric["name"], metric["host"], metric["time"]}, metric, upsert=True )
+        return self._col.update( {"name": metric["name"], "host": metric["host"], "time": metric["time"]}, metric, upsert=True )
 
 
     def find( self, match=None, proj=None ):
