@@ -26,7 +26,7 @@ class ComponentState(object):
         self.timer = None
         self.reset_timer()
 
-    def reset_timer(self):
+    def reset_timer(self, *__args, **__kwds):
         if self.timer is not None:
             self.timer.stop()
         # send one state ping message
