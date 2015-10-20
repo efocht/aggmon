@@ -105,7 +105,9 @@ if __name__ == "__main__":
                       help="remove a target from the subscriptions")
     subp.add_argument('--show', default=False, action="store_true", help="show subscriptions")
 
-    
+    rawp = sp.add_parser('raw',  help="Raw commands")
+    rawp.add_argument('args', nargs='+', help="raw command and arguments, arguments coming as key value pairs. Example: test_rpc key1 val1 key2 val2")
+
     pargs = ap.parse_args()
 
     log_level = eval("logging."+pargs.log.upper())
@@ -131,6 +133,12 @@ if __name__ == "__main__":
         elif pargs.show:
             result = show_subscriptions(context, server)
 
-    print "%r" % result
+    elif pargs.cmd_group == "raw":
+        if pargs.args is not None:
+            rpc_cmd = pargs.args[0]
+            rpc_args = dict_from_args(*pargs.args[1:])
+            result = send_rpc(context, server, rpc_cmd, **rpc_args)
+
+    print json.dumps(result)
 
     context.destroy()
