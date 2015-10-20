@@ -535,9 +535,12 @@ def relay_to_collectors(context, cmd, msg):
         pass
         #remove_all_job_agg_instances()
 
+    result = {}
     for cmd_port in get_collectors_cmd_ports():
         log.info("relaying msg to '%s'" % cmd_port)
-        send_rpc(context, cmd_port, cmd, **msg)
+        result[cmd_port] = send_rpc(context, cmd_port, cmd, **msg)
+
+    return result
 
 
 def request_resend(state):
@@ -797,16 +800,17 @@ if __name__ == "__main__":
         store = MongoDBJobList(host_name=dbconf["dbhost"], port=None, db_name=dbconf["dbname"],
                                username=dbconf["user"], password=dbconf["password"])
 
-
-    # TODO: add smart starter of components: check/load saved state, query a resend, kill and restart if no update?
+    # TODO: add smart starter of components: check/load saved state, query a resend,
+    #       kill and restart if no update?
     res = load_component_state(pargs.state_file)
 
-    if res is not None and pargs.kill:
-        log.info("... waiting 70 seconds for state messages to come in ...")
-        time.sleep(70)
-        log.info("killing components that were found running...")
-        kill_components()
-        time.sleep(10)
+    if pargs.kill:
+        if res is not None:
+            log.info("... waiting 70 seconds for state messages to come in ...")
+            time.sleep(70)
+            log.info("killing components that were found running...")
+            kill_components()
+            time.sleep(10)
         sys.exit(0)
 
     #
@@ -822,7 +826,8 @@ if __name__ == "__main__":
     rpc.register_rpc("add_tag", lambda x: relay_to_collectors(zmq_context, "add_tag", x), post=save_state_post)
     rpc.register_rpc("remove_tag", lambda x: relay_to_collectors(zmq_context, "remove_tag", x), post=save_state_post)
     rpc.register_rpc("reset_tags", lambda x: relay_to_collectors(zmq_context, "reset_tags", x), post=save_state_post)
-    #rpc.register_rpc("show_tags", local_show_tags)
+    rpc.register_rpc("show_tags", lambda x: relay_to_collectors(zmq_context, "show_tags", x))
+    rpc.register_rpc("show_subs", lambda x: relay_to_collectors(zmq_context, "show_subs", x))
 
 
     #time.sleep(30)
