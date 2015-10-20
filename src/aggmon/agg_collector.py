@@ -7,7 +7,10 @@
 import argparse
 import logging
 import os
-import wdb
+try:
+    import pdb
+except:
+    pass
 import pickle
 import re
 import socket
@@ -229,8 +232,8 @@ class SubscriberQueue(threading.Thread):
                 if count == 0:
                     tstart = time.time()
                 count += 1
-                #if count % 10000 == 0 or "PRINT" in msg:
-                if count % 10 == 0 or "PRINT" in msg:
+                if count % 10000 == 0 or "PRINT" in msg:
+                #if count % 10 == 0 or "PRINT" in msg:
                     tend = time.time()
                     sys.stdout.write("%d msgs in %f seconds, %f msg/s\n" %
                                      (count, tend - tstart, float(count)/(tend - tstart)))
