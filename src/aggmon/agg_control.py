@@ -6,10 +6,10 @@ import json
 import logging
 import os
 import pdb
-import subprocess
 import sys
 import time
 import zmq
+from agg_component import ComponentStatesRepo, group_name
 from agg_rpc import send_rpc, zmq_own_addr_for_uri, RPCThread
 from agg_job_command import send_agg_command
 from repeat_timer import RepeatTimer
@@ -44,9 +44,7 @@ push to them. The configuration, which metrics shall be aggregated and how, must
 
 """
 # hierarchy: component -> group/host
-component_state = {}
-component_start_cb = {}
-component_kill_cb = {}
+component_states = None
 
 # job_agg timers indexed by jobid
 jagg_timers = {}
@@ -197,225 +195,9 @@ def load_config( config_file ):
 
 
 
-def component_key(keys, kwds):
-    key = []
-    for k in keys:
-        if k in kwds:
-            key.append(kwds[k])
-        elif len(key) > 0:
-            return ":".join(key) + ":"
-    return ":".join(key)
-
-
-def check_output(*popenargs, **kwargs):
-    process = subprocess.Popen(stdout=subprocess.PIPE, *popenargs, **kwargs)
-    output, unused_err = process.communicate()
-    retcode = process.poll()
-    if retcode:
-        cmd = kwargs.get("args")
-        if cmd is None:
-            cmd = popenargs[0]
-        error = subprocess.CalledProcessError(retcode, cmd)
-        error.output = output
-        raise error
-    return output
-
-# trick for adding check_output on python < 2.7
-try:
-    subprocess.check_output
-except:
-    subprocess.check_output = check_output
-
-
-def group_name(group):
-    return group.lstrip("/").replace("/", "_")
-
-
-def start_component(service, group_path, __CALLBACK=None, __CALLBACK_ARGS=[], **kwds):
-    global config, component_start_cb
-
-    if group_path not in config["groups"]:
-        log.error("start_component: group '%s' not found in configuration!" % group_path)
-        return False
-    if service not in config["services"]:
-        log.error("start_component: service '%s' not found in configuration!" % service)
-        return False
-    group = group_name(group_path)
-    nodes_key = "%s_nodes" % service
-    if nodes_key not in config["groups"][group_path]:
-        log.error("start_component: '%s' not found in configuration of group '%s'!" % (nodes_key, group_path))
-        return False
-    nodes = config["groups"][group_path][nodes_key]
-    assert(isinstance(nodes, list))
-    locals().update(kwds)
-    if "database" in config:
-        if isinstance(config["database"], dict):
-            locals().update(config["database"])
-    svc_info = config["services"][service]
-    cwd = svc_info["cwd"]
-    cmd = svc_info["cmd"]
-    if "cmdport_range" in svc_info:
-        cmdport = "tcp://0.0.0.0:%s" % svc_info["cmdport_range"]
-    if "listen_port_range" in svc_info:
-        listen = "tcp://0.0.0.0:%s" % svc_info["listen_port_range"]
-    if "logfile" in svc_info:
-        logfile = svc_info["logfile"] % locals()
-    state_file = "/tmp/state_%(service)s_%(group)s" % locals()
-    # register callback
-    if __CALLBACK is not None:
-        key = service + ":" + component_key(config["services"][service]["component_key"], kwds)
-        component_start_cb[key] = {"cb": __CALLBACK, "args": __CALLBACK_ARGS}
-    for host in nodes:
-        try:
-            cmd = cmd % locals()
-            exec_cmd = config["global"]["remote_cmd"] % locals()
-            log.info("starting subprocess: %s" % exec_cmd)
-            out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
-            log.info("output: %s" % out)
-            break
-        except Exception as e:
-            log.error("subprocess error '%r'" % e)
-            log.error("subprocess error when running '%s' : '%r'" % (exec_cmd, e))
-            # trying the next node, if any
-
-
-def kill_component(service, group_path, __CALLBACK=None, __CALLBACK_ARGS=[], METHOD="msg", **kwds):
-    global config, component_kill_cb, zmq_context, pargs
-
-    msg = {"component": service, "group": group_path}
-    msg.update(kwds)
-    res = False
-
-    group = group_name(group_path)
-    state = get_component_state(msg)
-    if state is None:
-        log.warning("component '%s' state not found. Don't know how to kill it." % service)
-        return False
-    if METHOD == "msg":
-        if "cmd_port" in state:
-            # send "quit" cmd over RPC
-            reply = send_rpc(zmq_context, state["cmd_port"], "quit")
-            if reply is not None:
-                res = True
-        elif "listen" in state:
-            # send "quit" cmd over PULL port
-            send_agg_command(zmq_context, state["listen"], "quit")
-            res = True
-    else:
-        # kill process using the remembered pid. This could be dangerous as we could kill another process.
-        try:
-            exec_cmd = config["global"]["remote_kill"] % state
-            out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
-            #res = del_component_state(msg)
-            send_rpc(zmq_context, pargs.cmd_port, "del_component_state", **msg)
-        except Exception as e:
-            log.error("subprocess error when running '%s' : '%r'" % (exec_cmd, e))
-            res = False
-    return res
-
-
-def set_component_state(msg):
-    global component_state, config, component_start_cb
-
-    log.debug("set_component_state: msg %r" % msg)
-    #pdb.set_trace()
-    if "component" not in msg:
-        log.error("set_component_state message has no component!? %r" % msg)
-        # TODO raise ComponentMsgError
-        return None
-    component = msg["component"]
-    if component not in component_state:
-        component_state[component] = {}
-    # now make a meaningful minimal unique key
-    key = component_key(config["services"][component]["component_key"], msg)
-    started = None
-    if key in component_state[component]:
-        log.info("set_component_state: updating state for %s %s" % (component, key))
-        started = component_state[component][key]["started"]
-    else:
-        log.info("set_component_state: setting state for %s %s" % (component, key))
-    msg["last_update"] = time.time()
-    if started is not None:
-        if started != msg["started"]:
-            msg["restart!"] = True
-    component_state[component][key] = msg
-    cbkey = component + ":" + key
-    if cbkey in component_start_cb:
-        cb = component_start_cb[cbkey]["cb"]
-        args = component_start_cb[cbkey]["args"]
-        try:
-            cb(*args)
-        except Exception as e:
-            log.error("start_cb error: %r" % e)
-        del component_start_cb[cbkey]
-
-
-def get_component_state(msg):
-    global component_state, config
-
-    log.debug("get_component_state: msg %r" % msg)
-    if "component" not in msg:
-        return component_state
-    component = msg["component"]
-    if component not in component_state:
-        return {}
-    key = component_key(config["services"][component]["component_key"], msg)
-    if len(key) > 0:
-        if key in component_state[component]:
-            return component_state[component][key]
-        else:
-            # try to match for it
-            for k in component_state[component].keys():
-                if k.startswith(key):
-                    return component_state[component][k]
-    else:
-        # return all components of this type
-        return component_state[component]
-
-
-def del_component_state(msg):
-    global component_state, config, component_kill_cb
-
-    log.info("del_component_state: msg %r" % msg)
-    if "component" not in msg:
-        return False
-    component = msg["component"]
-    if component not in component_state:
-        return False
-    key = component_key(config["services"][component]["component_key"], msg)
-    if len(key) > 0:
-        fullkey = None
-        if key in component_state[component]:
-            fullkey = key
-        else:
-            # try to match for it
-            for k in component_state[component].keys():
-                if k.startswith(key):
-                    fullkey = k
-                    break
-        if fullkey is not None:
-            log.info("del_component_state: deleting state for '%s' -> '%s'" % (component, fullkey))
-            del component_state[component][fullkey]
-            # callback handling
-            cbkey = component + ":" + fullkey
-            if cbkey in component_kill_cb:
-                cb = component_start_cb[cbkey]["cb"]
-                args = component_start_cb[cbkey]["args"]
-                try:
-                    cb(*args)
-                except Exception as e:
-                    log.error("kill_cb error: %r" % e)
-                del component_kill_cb[cbkey]
-
-            if component_state[component] == {}:
-                del component_state[component]
-            return True
-    return False
-
-
 def get_collectors_cmd_ports():
     cmd_ports = []
-    pubs = get_component_state({"component": "collector"})
+    pubs = component_states.get_state({"component": "collector"})
     if pubs is not None:
         for k, v in pubs.items():
             cmd_ports.append(v["cmd_port"])
@@ -423,7 +205,7 @@ def get_collectors_cmd_ports():
 
 
 def get_job_agg_port(jobid):
-    state = get_component_state({"component": "job_agg", "jobid": jobid})
+    state = component_states.get_state({"component": "job_agg", "jobid": jobid})
     if state is not None and "listen" in state:
         return state["listen"]
 
@@ -438,7 +220,7 @@ def get_top_level_group():
 def get_push_target(name):
     if name == "@TOP_STORE":
         top_group = get_top_level_group()
-        top_store_state = get_component_state({"component": "data_store", "group": top_group})
+        top_store_state = component_states.get_state({"component": "data_store", "group": top_group})
         if top_store_state is not None and "listen" in top_store_state:
             return top_store_state["listen"]
 
@@ -477,7 +259,7 @@ def do_aggregate(jobid, agg_cfg):
 
 
 def make_timers(jobid):
-    global aggregate, component_state, jagg_timers
+    global aggregate, jagg_timers
 
     timers = []
     for cfg in aggregate["job"]:
@@ -490,12 +272,12 @@ def make_timers(jobid):
 def create_job_agg_instance(jobid):
     global me_rpc
 
-    jagg = get_component_state({"component": "job_agg", "jobid": jobid})
+    jagg = component_states.get_state({"component": "job_agg", "jobid": jobid})
     if jagg is not None:
         return
     msgbus_arr = ["--msgbus %s" % cmd_port for cmd_port in get_collectors_cmd_ports()]
-    start_component("job_agg", "/universe", jobid=jobid, __CALLBACK=make_timers, __CALLBACK_ARGS=[jobid],
-                    dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
+    component_states.start_component("job_agg", "/universe", jobid=jobid, __CALLBACK=make_timers, __CALLBACK_ARGS=[jobid],
+                                     dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
     # wait for component to appear?
     # create timer instance and set in component_state? can this be handled as a callback?
 
@@ -507,7 +289,7 @@ def remove_job_agg_instance(jobid):
         # kill timer if it exists
         for timer in jagg_timers[jobid]:
             timer.stop()
-    jagg = get_component_state({"component": "job_agg", "jobid": jobid})
+    jagg = component_states.get_state({"component": "job_agg", "jobid": jobid})
     if jagg is not None:
         kill_component("job_agg", "/universe", jobid=jobid)
         # TODO: sending quit message should happen in kill_component
@@ -543,119 +325,24 @@ def relay_to_collectors(context, cmd, msg):
     return result
 
 
-def request_resend(state):
-    global zmq_context
-
-    res = False
-    if "cmd_port" in state:
-        # send "quit" cmd over RPC
-        reply = send_rpc(zmq_context, state["cmd_port"], "resend_state")
-        if reply is not None:
-            res = True
-    elif "listen" in state:
-        # send "quit" cmd over PULL port
-        send_agg_command(zmq_context, state["listen"], "resend_state")
-        res = True
-    return res
-
-
-def load_state(name):
-    try:
-        fp = open(name)
-        state = json.load(fp)
-        fp.close()
-    except Exception as e:
-        log.error("Exception in state load '%s': %r" % (name, e))
-        return []
-    return state
-
-
-def load_component_state(name, mode="keep"):
-    """
-    Load component state from disk or database.
-    Parameters:
-    name: the file name where the state is saved
-    mode: load mode: can be:
-          "keep": keep running components
-          "restart": restart running components
-          ...?
-    """
-    loaded = load_state(name)
-    if len(loaded) == 0 or len(loaded[0]) == 0:
-        return None
-    loaded_state = loaded[0]
-    #
-    # only mode == "keep" is implemented
-    #
-    # request resend of state from all components
-    for component, compval in loaded_state.items():
-        component_state[component] = compval
-        for ckey, cstate in compval.items():
-            # set the "outdated!" attribute
-            # it will disappear if the component sends a component update message
-            # thus it is used for marking non-working components
-            component_state[component][ckey]["outdated!"] = True
-            request_resend(cstate)
-            time.sleep(0.05)
-    return True
-
-
-def save_state(name, state):
-    """
-    'name' is the filename where to store the state
-    'state' is a list of objects to be saved
-    """
-    try:
-        fp = open(name, "w")
-        json.dump(state, fp)
-        fp.close()
-    except Exception as e:
-        log.error("Exception in state save '%s': %r" % (name, e))
-        return False
-    return True
-
-
-def save_state_post(msg):
-    global component_state, pargs
-
-    log.debug("save_state_post")
-    save_state(pargs.state_file, [component_state])
-
-
-def make_timers_and_save(msg):
-    global component_state
-
+def make_timers_and_save(msg, component_states, state_file):
     log.debug("make_timers_and_save")
     if "component" in msg and msg["component"] == "job_agg":
         jobid = msg["jobid"]
         if jobid not in jagg_timers:
             make_timers(jobid)
-    save_state_post(msg)
-
-
-def component_wait_timeout(component, num, timeout=120):
-    """
-    Wait until 'num' components of the given type have appeared
-    or timeout was reached.
-    """
-    tstart = time.time()
-
-    while component not in component_state or len(component_state[component].keys()) < num:
-        time.sleep(0.1)
-        if time.time() - tstart > timeout:
-            return False
-    return True
+    component_states.save_state(msg, state_file)
 
 
 def start_fixups(program_restart=False, program_start=False):
     """
-
     -
 
     :param program_restart:
+    :param program_start:
+
     :return: True if successful, False otherwise
     """
-
 
     global job_list, zmq_context
 
@@ -663,16 +350,16 @@ def start_fixups(program_restart=False, program_start=False):
     num_collectors_started = 0
     for group_path in config["groups"]:
         group = group_name(group_path)
-        pub = get_component_state({"component": "collector", "group": group_path})
+        pub = component_states.get_state({"component": "collector", "group": group_path})
         if pub == {} or "outdated!" in pub:
             if "outdated!" in pub:
-                del_component_state({"component": "collector", "group": group_path})
-            start_component("collector", group_path, statefile="/tmp/state.agg_collector_%s" % group,
+                component_states.del_state({"component": "collector", "group": group_path})
+            component_states.start_component("collector", group_path, statefile="/tmp/state.agg_collector_%s" % group,
                             dispatcher=me_rpc)
             num_collectors_started += 1
         num_collectors += 1
 
-    if not component_wait_timeout("collector", num_collectors, timeout=180):
+    if not component_states.component_wait_timeout("collector", num_collectors, timeout=180):
         return False, "timeout when waiting for collectors startup!"
 
     if program_restart:
@@ -687,12 +374,13 @@ def start_fixups(program_restart=False, program_start=False):
     msgbus_arr = ["--msgbus %s" % cmd_port for cmd_port in get_collectors_cmd_ports()]
     for group_path in config["groups"]:
         group = group_name(group_path)
-        mong = get_component_state({"component": "data_store", "group": group_path})
+        mong = component_states.get_state({"component": "data_store", "group": group_path})
         if mong == {} or "outdated!" in mong:
             if "outdated!" in pub:
-                del_component_state({"component": "data_store", "group": group_path})
-            start_component("data_store", group_path, statefile="/tmp/state.data_store_%s" % group,
-                            dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
+                component_states.del_state({"component": "data_store", "group": group_path})
+            component_states.start_component("data_store", group_path,
+                                             statefile="/tmp/state.data_store_%s" % group,
+                                             dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
 
 
     #
@@ -704,7 +392,7 @@ def start_fixups(program_restart=False, program_start=False):
     # when we are restarting, we need the whole shebang on new and finished jobs and retagging
     # when collectors were restarted, subscribers need to resubscribe
     #
-    jaggs = get_component_state({"component": "job_agg"})
+    jaggs = component_states.get_state({"component": "job_agg"})
     for jobid, jcomp in jaggs.items():
         if "outdated!" in jcomp or "exited!" in jcomp:
             remove_job_agg_instance(jobid)
@@ -738,25 +426,10 @@ def start_fixups(program_restart=False, program_start=False):
         #
         # ask data stores to resubscribe
         #
-        stores = get_component_state({"component": "data_store"})
+        stores = component_states.get_state({"component": "data_store"})
         for skey, state in stores.items():
             cmd_port = state["cmd_port"]
             send_rpc(zmq_context, cmd_port, "resubscribe")
-
-
-
-
-def kill_components():
-    for group_path in config["groups"]:
-        for comp_type in ("collector", "data_store", "job_agg"):
-            c = get_component_state({"component": comp_type, "group": group_path})
-            if c is not None:
-                if "component" in c:
-                    kill_component(comp_type, group_path, METHOD="kill")
-                else:
-                    log.info("components: %r" % c)
-                    for jobid, jagg in c.items():
-                        kill_component(comp_type, group_path, jobid=jobid, METHOD="kill")
 
 
 if __name__ == "__main__":
@@ -777,22 +450,21 @@ if __name__ == "__main__":
 
     load_config(pargs.config)
 
-    state = []
-    if len(pargs.state_file) > 0:
-        state = load_state(pargs.state_file)
-        # now check running daemons, etc.
-
     zmq_context = zmq.Context()
+
+    me_addr = zmq_own_addr_for_uri("tcp://8.8.8.8:10000")
 
     rpc = RPCThread(zmq_context, listen=pargs.cmd_port)
     rpc.start()
 
-    rpc.register_rpc("set_component_state", set_component_state, post=make_timers_and_save)
-    rpc.register_rpc("del_component_state", del_component_state, post=save_state_post)
-    rpc.register_rpc("get_component_state", get_component_state)
-
-    me_addr = zmq_own_addr_for_uri("tcp://8.8.8.8:10000")
     me_rpc = "tcp://%s:%d" % (me_addr, rpc.port)
+    component_states = ComponentStatesRepo(config, me_rpc, zmq_context)
+
+    rpc.register_rpc("set_component_state", component_states.set_state,
+                     post=make_timers_and_save, post_args=[component_states, pargs.state_file])
+    rpc.register_rpc("del_component_state", component_states.del_state,
+                     post=component_states.save_state, post_args=[pargs.state_file])
+    rpc.register_rpc("get_component_state", component_states.get_state)
 
     if not pargs.kill:
         # connect to the top level database. the one which stores the job lists
@@ -802,14 +474,14 @@ if __name__ == "__main__":
 
     # TODO: add smart starter of components: check/load saved state, query a resend,
     #       kill and restart if no update?
-    res = load_component_state(pargs.state_file)
+    res = component_states.load_state(pargs.state_file)
 
     if pargs.kill:
         if res is not None:
             log.info("... waiting 70 seconds for state messages to come in ...")
             time.sleep(70)
             log.info("killing components that were found running...")
-            kill_components()
+            component_states.kill_components(["collector", "data_store", "job_agg"])
             time.sleep(10)
         sys.exit(0)
 
@@ -823,9 +495,12 @@ if __name__ == "__main__":
     start_fixups(program_restart=((res is not None) and True or False),
                  program_start=((res is None) and True or False))
 
-    rpc.register_rpc("add_tag", lambda x: relay_to_collectors(zmq_context, "add_tag", x), post=save_state_post)
-    rpc.register_rpc("remove_tag", lambda x: relay_to_collectors(zmq_context, "remove_tag", x), post=save_state_post)
-    rpc.register_rpc("reset_tags", lambda x: relay_to_collectors(zmq_context, "reset_tags", x), post=save_state_post)
+    rpc.register_rpc("add_tag", lambda x: relay_to_collectors(zmq_context, "add_tag", x),
+                     post=component_states.save_state, post_args=[pargs.state_file])
+    rpc.register_rpc("remove_tag", lambda x: relay_to_collectors(zmq_context, "remove_tag", x),
+                     post=component_states.save_state, post_args=[pargs.state_file])
+    rpc.register_rpc("reset_tags", lambda x: relay_to_collectors(zmq_context, "reset_tags", x),
+                     post=component_states.save_state, post_args=[pargs.state_file])
     rpc.register_rpc("show_tags", lambda x: relay_to_collectors(zmq_context, "show_tags", x))
     rpc.register_rpc("show_subs", lambda x: relay_to_collectors(zmq_context, "show_subs", x))
 
