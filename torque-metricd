@@ -36,7 +36,7 @@ In addition to storing metrics in a database there are some other tasks (JobTask
 that are executed on job start and stop events.
 """
 
-class JobTask:
+class JobTask(object):
     """ Interface definition for tasks to be executed on job start and stop events """
     def addJob( self, metric ):
         """ This method is called if an job "started" or "restarted" event is received """
@@ -46,42 +46,61 @@ class JobTask:
         """ This method is called if an job "aborted", "checkpointed", "deleted" and "exited" event is received """
         raise NotImplementedException()
 
+
 class JobCache(JobTask):
     """ Temporary storage (memory) for Jobs with unique JobID (name) """
     def __init__( self ):
         self.__cache = {}
+        self.__early_delete = {}
 
     def addJob( self, metric ):
-        self.__cache[metric["name"]] = copy.deepcopy( metric )
+        name = metric["name"]
+        if self._is_early_delete(name):
+            del self.__early_delete[name]
+        else:
+            self.__cache[metric["name"]] = copy.deepcopy( metric )
 
     def removeJob( self, name ):
-        try:
+        if name in self.__cache:
             del self.__cache[name]
-        except:
-            pass
+        else:
+            self.__early_delete[name] = True
 
     def getList( self ):
         return self.__cache.values()
 
-class JobList(JobTask):
+    def _in_cache( self, name ):
+        return name in self.__cache
+
+    def _is_early_delete( self, name ):
+        return name in self.__early_delete
+
+
+class JobList(JobCache):
     """ Permanent storage (MongoDB) for Jobs with unique JobID (name) """
     def __init__( self, conf ):
+        super(JobList, self).__init__()
         self.__create_joblist = conf["create_joblist"]
         if self.__create_joblist:
             self.__joblist = MongoDBJobList( host_name=conf["mongodb_host"], username=conf["mongodb_uname"], password=conf["mongodb_pw"] )
 
     def addJob( self, metric ):
         if self.__create_joblist:
-            self.__joblist.addJob( metric )
+            super(JobList, self).addJob( metric )
+            if self._in_cache(metric["name"]):
+                self.__joblist.addJob( metric )
 
     def removeJob( self, name ):
         if self.__create_joblist:
-            self.__joblist.removeJob( name )
+            super(JobList, self).removeJob( name )
+            if not self._is_early_delete(name):
+                self.__joblist.removeJob( name )
 
     def getList( self ):
         return self.__joblist.getList()
 
-class Tagger(JobTask):
+
+class Tagger(JobCache):
     """ Execute an external program for currently running jobs that e.g. adds Job information to metrics"""
     def __init__(self, conf ):
         self.__call_tagger = conf["call_tagger"]
@@ -92,22 +111,26 @@ class Tagger(JobTask):
     def addJob( self, metric ):
         if not self.__call_tagger:
             return
-        nodelist = []
-        if isinstance( metric["cnodes"], dict ):
-            nodelist = metric["cnodes"].keys()
-        elif isinstance( metric["cnodes"], list ):
-            nodelist = metric["cnodes"]
-        if len(nodelist) == 1:
-            regex_str = nodelist[0]
-        else:
-            regex_str = "^(" + "|".join( nodelist ) + ")$"
-        csv_str = ",".join( nodelist )
-        self.__invoke(self.__cmd, ACTION="add", CNODES_REGEX=regex_str, CNODES_CSV=csv_str, **metric )
+        super(Tagger, self).addJob( metric )
+        if self._in_cache(metric["name"]):
+            nodelist = []
+            if isinstance( metric["cnodes"], dict ):
+                nodelist = metric["cnodes"].keys()
+            elif isinstance( metric["cnodes"], list ):
+                nodelist = metric["cnodes"]
+            if len(nodelist) == 1:
+                regex_str = nodelist[0]
+            else:
+                regex_str = "^(" + "|".join( nodelist ) + ")$"
+            csv_str = ",".join( nodelist )
+            self.__invoke(self.__cmd, ACTION="add", CNODES_REGEX=regex_str, CNODES_CSV=csv_str, **metric )
 
     def removeJob( self, name ):
         if not self.__call_tagger:
             return
-        self.__invoke(self.__cmd, ACTION="del", **metric )
+        super(Tagger, self).removeJob( name )
+        if not self._is_early_delete(name):
+            self.__invoke(self.__cmd, ACTION="del", **metric )
 
     @staticmethod
     def __invoke( cmd, **kwargs ):
