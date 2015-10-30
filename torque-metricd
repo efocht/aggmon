@@ -152,6 +152,7 @@ CONFIG_DEFAULTS = {"acc_file_dir"   : TORQUE_ACCOUNTING_PATH,
                    "log_level"      : "warning",
                    "to_syslog"      : "True",
                    "mongodb_host"   : "localhost",
+                   "mongodb_dbname" : "metric",
                    "mongodb_uname"  : "",
                    "mongodb_pw"     : "",
                    "include_cpus"   : "False",
@@ -335,6 +336,7 @@ def read_config():
     conf["tag_file"] = config.get( "daemon", "tag_file" )
     conf["max_acc_files"] = config.getint( "daemon", "max_acc_files" )
     conf["mongodb_host"] = config.get( "daemon", "mongodb_host" )
+    conf["mongodb_dbname"] = config.get( "daemon", "mongodb_dbname" )
     conf["mongodb_uname"] = config.get( "daemon", "mongodb_uname" )
     conf["mongodb_pw"] = config.get( "daemon", "mongodb_pw" )
     conf["include_cpus"] = config.getboolean( "daemon", "include_cpus" )
@@ -346,7 +348,7 @@ def read_config():
 
 def connect_metric_store( conf ):
     try:
-        store = MongoDBMetricStore( host_name=conf["mongodb_host"], username=conf["mongodb_uname"], password=conf["mongodb_pw"] )
+        store = MongoDBMetricStore( host_name=conf["mongodb_host"], username=conf["mongodb_uname"], password=conf["mongodb_pw"], db_name=conf["mongodb_dbname"] )
     except Exception as e:
         log.error( "failed to connect to MongoDB (%s)! Terminating..." % str( e ) )
         sys.exit( 1 )
