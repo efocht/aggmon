@@ -151,7 +151,7 @@ class RPCThread(threading.Thread):
     
                         # post handling
                         if post is not None:
-                            log.debug( "RPC post() args=%r" % post_args )
+                            log.debug( "RPC post()=%r args=%r" % (post, post_args) )
                             post(msg, *post_args)
                     else:
                         rep_msg = json.dumps({"RESULT": "unknown command: '%s'" % cmd})
