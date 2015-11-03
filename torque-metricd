@@ -1,7 +1,7 @@
 #!/usr/bin/python2
 ##########################################################################
 #                                                                        #
-#               Copyright (C) 2013 - 2014 NEC HPC Europe.                #
+#               Copyright (C) 2013 - 2015 NEC HPC Europe.                #
 #                                                                        #
 #  These coded instructions, statements, and computer programs  contain  #
 #  unpublished  proprietary  information of NEC HPC Europe, and are      #
@@ -228,9 +228,9 @@ def is_file_open( pid, file_name ):
             pass
     return False
 
-def tail( pid, file_name ):
+def tail( pid, file_name, seek=0 ):
     fd = open( file_name )
-    fd.seek( 0, 2 )
+    fd.seek( seek )
     sleep = 0.001
     buf = ""
     eof = False
@@ -378,91 +378,96 @@ def connect_metric_store( conf ):
     return store
 
 # main
-conf = read_config()
-
-# set logging up
-try:
-    log = logging.getLogger( __name__ )
-    log_level = LOG_LEVELS[conf["log_level"].lower()]
-except:
-    log_level = config_defaults["log_level"]
-    log.warn( "unknown log level '%s'! Defaults to '%s'." % (log_level, config_defaults["log_level"]) )
-log.setLevel( log_level )
-if conf["to_syslog"]:
-    handler = logging.handlers.SysLogHandler( address="/dev/log" )
-else:
-    handler = logging.StreamHandler()
-log.addHandler( handler )
-for k, v in conf.items():
-    log.debug( "conf: %s = %s" % (k, str( v )) )
-tag_file = conf["tag_file"]
-
-# open database connection
-store = connect_metric_store( conf )
-
-# set signal handling up
-tag_new = None
-signal.signal(signal.SIGTERM, sig_handler)
-signal.signal(signal.SIGINT, sig_handler)
-
-# import backlog, add all job events to metric store, create cache of currently running jobs
-cache = JobCache()
-tag, last_log = get_tag( tag_file )
-tag_found = False
-file_names = sorted( glob.glob( conf["acc_file_dir"] + "/[0-9]*" ) )
-start = len( file_names ) - conf["max_acc_files"] if conf["max_acc_files"] >= 0 else 0
-for file_name in file_names[start:]:
-    with open( file_name ) as f:
-        acc_log = os.path.basename( file_name )
-        if last_log and acc_log < last_log:
-            continue
-        log.debug( "importing metrics from: %s" % file_name )
-        for line in f:
-            tag_new = md5sum( line )
-            if not tag or tag_found:
-                metric = parse_torque_accounting_log( line )
-                if metric:
-                    try:
-                        store.addMetric( metric )
-                        log.debug( "stored: %s" % str( metric ) )
-                    except Exception as e:
-                        log.error( "failed to handle backlog metric: %s" % str( e.__class__.__name__ ) )
-                    update_job_tasks( metric, [cache] )
-            else:
-                if tag_new == tag:
-                    tag_found = True
-if tag_new:
-    put_tag( tag_file, tag_new, acc_log )
+if __name__ == "__main__":
+    conf = read_config()
+    
+    # set logging up
+    try:
+        log = logging.getLogger( __name__ )
+        log_level = LOG_LEVELS[conf["log_level"].lower()]
+    except:
+        log_level = config_defaults["log_level"]
+        log.warn( "unknown log level '%s'! Defaults to '%s'." % (log_level, config_defaults["log_level"]) )
+    log.setLevel( log_level )
+    if conf["to_syslog"]:
+        handler = logging.handlers.SysLogHandler( address="/dev/log" )
+    else:
+        handler = logging.StreamHandler()
+    log.addHandler( handler )
+    for k, v in conf.items():
+        log.debug( "conf: %s = %s" % (k, str( v )) )
+    tag_file = conf["tag_file"]
+    
+    # open database connection
+    store = connect_metric_store( conf )
+    
+    # set signal handling up
     tag_new = None
-if tag and not tag_found:
-    log.warn( "tag (%s) not found in any considered acc file (%s)!" % (tag, conf["acc_file_dir"]) )
-
-# push cache that contains currently running jobs collected from backlog to tagger and mongodb's joblist collection
-joblist = JobList( conf )
-tagger = Tagger( conf )
-for metric in cache.getList():
-    log.debug( "running job from backlog: %s" % str( metric ))
-    update_job_tasks( metric, [tagger, joblist] )
-del cache
-
-# tail current accounting file
-while True:
-    pid = torque_pid()
+    signal.signal(signal.SIGTERM, sig_handler)
+    signal.signal(signal.SIGINT, sig_handler)
+    
+    # import backlog, add all job events to metric store, create cache of currently running jobs
+    cache = JobCache()
+    tag, last_log = get_tag( tag_file )
+    tag_found = False
     file_names = sorted( glob.glob( conf["acc_file_dir"] + "/[0-9]*" ) )
-    if not file_names:
-        log.warn( "no accounting file found in %s, waiting..." % conf["acc_file_dir"] )
-        time.sleep( 30 )
-        continue
-    file_name = file_names[-1]
-    log.info( "monitoring acc file: %s" % file_name )
-    for line in tail( pid, file_name ):
-        acc_log = os.path.basename( file_name )   # placed here due to sudden SIGTERM
-        tag_new = md5sum( line )
-        metric = parse_torque_accounting_log( line )
-        if metric:
-            try:
-                store.addMetric( metric )
-                log.debug( "saved: %s" % str( metric ) )
-            except Exception as e:
-                log.error( "failed to handle metric: %s" % str( e ) )
-            update_job_tasks( metric, [tagger, joblist] )
+    start = len( file_names ) - conf["max_acc_files"] if conf["max_acc_files"] >= 0 else 0
+    last_file = None
+    last_position = 0
+    for file_name in file_names[start:]:
+        with open( file_name ) as f:
+            acc_log = os.path.basename( file_name )
+            if last_log and acc_log < last_log:
+                continue
+            log.debug( "importing metrics from: %s" % file_name )
+            for line in f:
+                tag_new = md5sum( line )
+                if not tag or tag_found:
+                    metric = parse_torque_accounting_log( line )
+                    if metric:
+                        try:
+                            store.addMetric( metric )
+                            log.debug( "stored: %s" % str( metric ) )
+                        except Exception as e:
+                            log.error( "failed to handle backlog metric: %s" % str( e.__class__.__name__ ) )
+                        update_job_tasks( metric, [cache] )
+                else:
+                    if tag_new == tag:
+                        tag_found = True
+            last_position = f.tell()
+            last_file = file_name
+    if tag_new:
+        put_tag( tag_file, tag_new, acc_log )
+        tag_new = None
+    if tag and not tag_found:
+        log.warn( "tag (%s) not found in any considered acc file (%s)!" % (tag, conf["acc_file_dir"]) )
+    
+    # push cache that contains currently running jobs collected from backlog to tagger and mongodb's joblist collection
+    joblist = JobList( conf )
+    tagger = Tagger( conf )
+    for metric in cache.getList():
+        log.debug( "running job from backlog: %s" % str( metric ))
+        update_job_tasks( metric, [tagger, joblist] )
+    del cache
+    
+    # tail current accounting file
+    while True:
+        pid = torque_pid()
+        file_names = sorted( glob.glob( conf["acc_file_dir"] + "/[0-9]*" ) )
+        if not file_names:
+            log.warn( "no accounting file found in %s, waiting..." % conf["acc_file_dir"] )
+            time.sleep( 30 )
+            continue
+        file_name = file_names[-1]
+        log.info( "monitoring acc file: %s" % file_name )
+        for line in tail( pid, file_name, seek=(file_name == last_file and last_position or 0) ):
+            acc_log = os.path.basename( file_name )   # placed here due to sudden SIGTERM
+            tag_new = md5sum( line )
+            metric = parse_torque_accounting_log( line )
+            if metric:
+                try:
+                    store.addMetric( metric )
+                    log.debug( "saved: %s" % str( metric ) )
+                except Exception as e:
+                    log.error( "failed to handle metric: %s" % str( e ) )
+                update_job_tasks( metric, [tagger, joblist] )
