@@ -1,9 +1,10 @@
 import json
 import logging
+import os
 import pdb
 import subprocess
 import time
-from agg_rpc import send_rpc
+from agg_rpc import send_rpc, zmq_own_addr_for_tgt
 from agg_job_command import send_agg_command
 from repeat_timer import RepeatTimer
 
@@ -61,6 +62,11 @@ class ComponentState(object):
         self.dispatcher = dispatcher
         self.ping_interval = ping_interval
         self.state = state
+        assert isinstance(self.state, dict), "ComponentState: state must be a dict!"
+        self.state["pid"] = os.getpid()
+        self.state["started"] = time.time()
+        self.state["host"] = zmq_own_addr_for_tgt('8.8.8.8')
+        self.state["ping_interval"] = self.ping_interval
         self.timer = None
         self.reset_timer()
 
