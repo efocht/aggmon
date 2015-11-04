@@ -447,6 +447,7 @@ if __name__ == "__main__":
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
     ap.add_argument('-S', '--state-file', default="agg_control.state", action="store", help="file to store state")
     ap.add_argument('-k', '--kill', default=False, action="store_true", help="kill components that were left running")
+    ap.add_argument('-w', '--wait', default=False, action="store_true", help="wait for 70s even if no state file was found")
     ap.add_argument('-v', '--verbose', type=int, default=0, action="store", help="verbosity")
     pargs = ap.parse_args()
 
@@ -483,7 +484,7 @@ if __name__ == "__main__":
     res = component_states.load_state(pargs.state_file)
 
     if pargs.kill:
-        if res is not None:
+        if res is not None or pargs.wait:
             log.info("... waiting 70 seconds for state messages to come in ...")
             time.sleep(70)
             log.info("killing components that were found running...")

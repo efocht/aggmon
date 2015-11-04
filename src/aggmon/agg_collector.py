@@ -379,12 +379,9 @@ if __name__ == "__main__":
         me_addr = zmq_own_addr_for_uri(pargs.dispatcher)
         me_listen = "tcp://%s:%d" % (me_addr, subq.port)
         me_rpc = "tcp://%s:%d" % (me_addr, rpc.port)
-        state = get_kwds(component="collector", cmd_port=me_rpc, listen=me_listen, group=pargs.group,
-                         host=zmq_own_addr_for_tgt('8.8.8.8'), pid=os.getpid(),
-                         started=time.time())
+        state = get_kwds(component="collector", cmd_port=me_rpc, listen=me_listen, group=pargs.group)
         component = ComponentState(context, pargs.dispatcher, state=state)
         rpc.register_rpc("resend_state", component.reset_timer)
-
 
     if len(pargs.msgbus) > 0:
         print "subscribing to all msgs from %s" % pargs.msgbus

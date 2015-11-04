@@ -221,9 +221,7 @@ if __name__ == "__main__":
         me_addr = zmq_own_addr_for_uri(pargs.dispatcher)
         me_listen = "tcp://%s:%d" % (me_addr, recv_port)
         me_rpc = "tcp://%s:%d" % (me_addr, rpc.port)
-        state = get_kwds(component="job_agg", cmd_port=me_rpc, listen=me_listen, jobid=pargs.jobid,
-                         host=zmq_own_addr_for_tgt('8.8.8.8'), pid=os.getpid(),
-                         started=time.time())
+        state = get_kwds(component="job_agg", cmd_port=me_rpc, listen=me_listen, jobid=pargs.jobid)
         component = ComponentState(context, pargs.dispatcher, state=state)
                  
 
