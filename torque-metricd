@@ -369,12 +369,19 @@ def read_config():
         conf["tagger_cmd"] = config.get("daemon", "tagger_cmd" )
     return conf
 
-def connect_metric_store( conf ):
-    try:
-        store = MongoDBMetricStore( host_name=conf["mongodb_host"], username=conf["mongodb_uname"], password=conf["mongodb_pw"], db_name=conf["mongodb_dbname"] )
-    except Exception as e:
-        log.error( "failed to connect to MongoDB (%s)! Terminating..." % str( e ) )
-        sys.exit( 1 )
+def connect_metric_store( conf, wait=0 ):
+    start = time.time()
+    while time.time() < start + wait + 1:
+        try:
+            store = MongoDBMetricStore( host_name=conf["mongodb_host"],
+                                        username=conf["mongodb_uname"],
+                                        password=conf["mongodb_pw"],
+                                        db_name=conf["mongodb_dbname"] )
+        except Exception as e:
+            log.error( "Failed to connect to MongoDB (%s)!" % str( e ) )
+            store = None
+            if time.time() < start + wait:
+                time.sleep(30)
     return store
 
 # main
@@ -396,16 +403,20 @@ if __name__ == "__main__":
     log.addHandler( handler )
     for k, v in conf.items():
         log.debug( "conf: %s = %s" % (k, str( v )) )
-    tag_file = conf["tag_file"]
     
     # open database connection
     store = connect_metric_store( conf )
-    
+    if store is None:
+        log.error("MongoDB not available at start. Terminating.")
+        sys.exit(1)
+
     # set signal handling up
     tag_new = None
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
     
+    tag_file = conf["tag_file"]
+
     # import backlog, add all job events to metric store, create cache of currently running jobs
     cache = JobCache()
     tag, last_log = get_tag( tag_file )
