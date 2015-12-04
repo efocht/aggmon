@@ -1,0 +1,15 @@
+Python BOOST C++ module
+(http://www.boost.org/doc/libs/1_59_0/libs/python/doc/index.html).
+module.cpp defines a trivial C++ class named VClass that contains a
+std::vector.  A second class named DClass is defined to hold double
+values in the vector.  DClass is wrapped and exposed to Python via
+BOOST_PYTHON_MODULE and form a module named "module".  To pass a regular
+Python list (containing double only) to DClass and to return a Python list
+the conversion templates std_vec_to_to_py_list() and py_list_to_std_vec()
+are used.
+
+module.py shows how to use the C++ module.
+
+make         # compile and link module
+make run     # run demo module.py
+make check   # check if BOOST etc. is installed
