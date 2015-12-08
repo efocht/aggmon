@@ -1,7 +1,6 @@
 #include <iostream>
 #include <vector>
 #include <boost/python/list.hpp>
-#include <boost/foreach.hpp>
 
 // convert std::vector to Python list
 template <typename T>
@@ -47,18 +46,21 @@ class VClass {
 };
 
 typedef VClass<double> DClass;
+typedef std::vector<double> List;
 
 // wrapper
 #include <python2.7/Python.h>
 #include <boost/python/module.hpp>
 #include <boost/python/suite/indexing/vector_indexing_suite.hpp>
 
-void initmyfunction() {;}
-
 using namespace boost::python;
 
 BOOST_PYTHON_MODULE(module)
 {
+    class_<List>("List")
+        .def(vector_indexing_suite<List>())
+        ;
+
     class_<DClass>("DClass")
         .def("getList", &DClass::getList)
         .def("setList", &DClass::setList)

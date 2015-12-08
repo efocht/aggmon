@@ -15,8 +15,9 @@ module.so: module.o Makefile
 module.o: module.cpp Makefile
 	$(CC) -c $(INC) $(CFLAGS) $< -o $@
 
+test: run
 run: module.so
-	@python module.py
+	@PYTHONPATH=.:$$PYTHONPATH python module.py
 
 check:
 	@for L in gcc gcc-c++ python-devel boost_python; do \
