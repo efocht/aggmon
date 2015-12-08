@@ -88,6 +88,7 @@ class Quantiles(object):
         return self._mean
 
 
+from quantiles import Quantiles as CQuantiles
 def aggregate( agg, values ):
     value = None
     if agg == "worst":
@@ -105,38 +106,39 @@ def aggregate( agg, values ):
             if element is None:
                 continue
             v.append( element["value"] )
-        q = Quantiles( v )
+        q = CQuantiles( v )
         value = (q.quantiles(), q.mean())
-    #
-    # and now the RRD metrics
-    #
-    n = 0
-    _sum = 0.0
-    _min = 1e+32
-    _max = -_min
-    for element in values:
-        if element is None:
-            continue
-        n += 1
-        value = element["value"]
-        if agg in ("sum", "avg"):
-            _sum += value
+    else:
+        #
+        # and now the RRD metrics
+        #
+        n = 0
+        _sum = 0.0
+        _min = 1e+32
+        _max = -_min
+        for element in values:
+            if element is None:
+                continue
+            n += 1
+            value = element["value"]
+            if agg in ("sum", "avg"):
+                _sum += value
+            elif agg == "max":
+                if value > _max:
+                    _max = value
+            elif agg == "min":
+                if value < _min:
+                    _min = value
+        result = {}
+        value = None
+        if agg == "sum":
+            value = _sum
         elif agg == "max":
-            if value > _max:
-                _max = value
+            value = _max
         elif agg == "min":
-            if value < _min:
-                _min = value
-    result = {}
-    value = None
-    if agg == "sum":
-        value = _sum
-    elif agg == "max":
-        value = _max
-    elif agg == "min":
-        value = _min
-    elif agg == "avg":
-        if n > 0:
-            value = _sum/float(n)
+            value = _min
+        elif agg == "avg":
+            if n > 0:
+                value = _sum/float(n)
     return value
 
