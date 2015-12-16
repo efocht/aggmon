@@ -81,9 +81,7 @@ def tags_show(context, server):
     return result
 
 
-
-if __name__ == "__main__":
-
+def aggmon_cmd(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument('-C', '--cmd-port', default="tcp://127.0.0.1:5556", action="store", help="RPC command port")
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
@@ -108,7 +106,7 @@ if __name__ == "__main__":
     rawp = sp.add_parser('raw',  help="Raw commands")
     rawp.add_argument('args', nargs='+', help="raw command and arguments, arguments coming as key value pairs. Example: test_rpc key1 val1 key2 val2")
 
-    pargs = ap.parse_args()
+    pargs = ap.parse_args(argv)
 
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
@@ -142,3 +140,6 @@ if __name__ == "__main__":
     print json.dumps(result)
 
     context.destroy()
+
+if __name__ == "__main__":
+    aggmon_cmd(sys.argv)

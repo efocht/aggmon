@@ -153,10 +153,7 @@ class JobAggregator(threading.Thread):
 
             self.queue.task_done()
 
-
-
-if __name__ == "__main__":
-
+def aggmon_jobagg(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5501", action="store", help="RPC command port")
     ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
@@ -167,7 +164,7 @@ if __name__ == "__main__":
                     help="subscription port(s) for message bus. can be used multiple times.")
     ap.add_argument('-s', '--stats', default=False, action="store_true", help="print statistics info")
     ap.add_argument('-v', '--verbose', type=int, default=0, action="store", help="verbosity")
-    pargs = ap.parse_args()
+    pargs = ap.parse_args(argv)
 
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
@@ -266,3 +263,7 @@ if __name__ == "__main__":
 
     time.sleep(0.1)
     print "%d messages received" % count
+    
+
+if __name__ == "__main__":
+    aggmon_jobagg(sys.argv)
