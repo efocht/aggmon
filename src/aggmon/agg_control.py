@@ -29,19 +29,28 @@ and orchestrates their interactions by calling them with appropriate arguments, 
 that the components get linked with each other according to the hierarchy.
 
 For each administrative (monitoring) group agg_control will start:
-- one agg_pub_sub instance. This instance waits for ZMQ PUSH messages with metric metadata or
+- one agg_collector instance. This instance waits for ZMQ PUSH messages with metric metadata or
   metric values. It handles subscriptions from other components like data_store or job aggregators.
 - one data_store instance. data_store instances will subscribe to the metric messages
   published by their corresponding agg_pub_sub instances.
 
-agg_control will receive tagger requests which it will pass on to all agg_pub_sub instances.
+agg_control will receive tagger requests which it will pass on to all agg_control instances.
 When job tagging requests are received, an add_tag will start an instance of the job aggregator
-responsible for this particular job and tell it where to subscribe (all agg_pub_sub instances).
+responsible for a particular job and tell it where to subscribe (all agg_control instances).
 A remove_tag request for a jobid will kill the job aggregator instance.
 
 Job aggregators will (for now) receive periodic requests for aggregation which agg_control will
 push to them. The configuration, which metrics shall be aggregated and how, must be still designed.
 
+agg_control writes a state file which contains the latest state of the started components.
+
+When agg_control (re)starts and finds a state file, it will wait for ~70s and listen for component
+state messages from previously spawned components. The configured state will be restored after
+this time period, i.e. components will be killed and spawned as configured (if the state differs)
+and they will be requested to re-subscribe.
+
+In order to clean up the distributed system and kill all components, agg_control should be invoked
+with the --kill command line option.
 """
 # hierarchy: component -> group/host
 component_states = None
