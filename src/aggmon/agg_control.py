@@ -96,7 +96,8 @@ config = {
             "cmdport_range": "5000-5999",
             "component_key":  ["jobid"],
             "listen_port_range": "5300-5999",
-            "logfile": "/tmp/%(service)s_%(jobid)s.log"
+            "logfile": "/tmp/%(service)s_%(jobid)s.log",
+            "min_nodes": 4
         }
     },
     "database": {
@@ -271,6 +272,19 @@ def make_timers(jobid):
     jagg_timers[jobid] = timers
 
 
+def msg_tag_num_hosts(msg):
+    "Determine the number of hosts a tag message is supposed to match."
+    if "H" not in msg:
+        return 0
+    if not isinstance(msg["H"], dict) or "s" not in msg["H"]:
+        log.error("Unexpected tag message: %r" % msg)
+        return 0
+    matchexp = msg["H"]["s"]
+    if matchexp.startswith("RE:"):
+        return len(matchexp.lstrip("RE:").split("|"))
+    return 1
+
+
 def create_job_agg_instance(jobid):
     global me_rpc
 
@@ -311,12 +325,15 @@ def relay_to_collectors(context, cmd, msg):
     kill job_agg component when tag is removed (i.e. job has finished).
     Relay msg to collector components RPC ports.
     """
+    global config
     if cmd == "add_tag" and msg["TAG_KEY"] == "J":
         jobid = msg["TAG_VALUE"]
-        create_job_agg_instance(jobid)
+        nhosts = msg_tag_num_hosts(msg)
+        if nhosts >= config["services"]["job_agg"]["min_hosts"]:
+            create_job_agg_instance(jobid)
     elif cmd == "remove_tag" and msg["TAG_KEY"] == "J":
         jobid = msg["TAG_VALUE"]
-        remove_job_agg_instance(jobid)
+        remove_job_agg_instance(jobid, msg)
     elif cmd == "reset_tags":
         pass
         #remove_all_job_agg_instances()
@@ -349,7 +366,7 @@ def start_fixups(program_restart=False, program_start=False):
     :return: True if successful, False otherwise
     """
 
-    global job_list, zmq_context
+    global config, job_list, zmq_context
 
     num_collectors = 0
     num_collectors_started = 0
@@ -418,7 +435,8 @@ def start_fixups(program_restart=False, program_start=False):
             if jobid not in jaggs:
                 # start aggregators for new jobs
                 # these will subscribe themselves to collectors
-                create_job_agg_instance(jobid)
+                if len(j["cnodes"]) >= config["services"]["job_agg"]["min_nodes"]:
+                    create_job_agg_instance(jobid)
             else:
                 # old job_aggs
                 # ask these ones to re-subscribe
@@ -429,18 +447,18 @@ def start_fixups(program_restart=False, program_start=False):
 
             # add tagging for running jobs
             nodes = j["cnodes"]
-            if len(nodes) == 1:
-                nodesmatch = nodes[0]
-            else:
-                nodesmatch = "RE:^(%s)$" % "|".join(nodes)
-            for cmd_port in get_collectors_cmd_ports():
-                log.info("adding tag for job '%s' on collector '%s'" % (jobid, cmd_port))
-                send_rpc(zmq_context, cmd_port, "add_tag", TAG_KEY="J", TAG_VALUE=jobid, J=nodesmatch)
+            if len(nodes) >= config["services"]["job_agg"]["min_nodes"]:
+                if len(nodes) == 1:
+                    nodesmatch = nodes[0]
+                else:
+                    nodesmatch = "RE:^(%s)$" % "|".join(nodes)
+                for cmd_port in get_collectors_cmd_ports():
+                    log.info("adding tag for job '%s' on collector '%s'" % (jobid, cmd_port))
+                    send_rpc(zmq_context, cmd_port, "add_tag", TAG_KEY="J", TAG_VALUE=jobid, H=nodesmatch)
 
 
-if __name__ == "__main__":
-    #global me_rpc, zmq_context
-
+def aggmon_control(argv):
+    
     ap = argparse.ArgumentParser()
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5556", action="store", help="RPC command port")
     ap.add_argument('-c', '--config', default="config.d", action="store", help="configuration directory")
@@ -449,7 +467,7 @@ if __name__ == "__main__":
     ap.add_argument('-k', '--kill', default=False, action="store_true", help="kill components that were left running")
     ap.add_argument('-w', '--wait', default=False, action="store_true", help="wait for 70s even if no state file was found")
     ap.add_argument('-v', '--verbose', type=int, default=0, action="store", help="verbosity")
-    pargs = ap.parse_args()
+    pargs = ap.parse_args(argv)
 
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(threadName)s][%(filename)s:%(lineno)d] %(message)s"
@@ -530,3 +548,6 @@ if __name__ == "__main__":
             log.error("main thread exception: %r" % e)
             break
     print "THE END"
+
+if __name__ == "__main__":
+    aggmon_control(sys.argv)

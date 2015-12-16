@@ -301,9 +301,7 @@ def test_pub():
         print "%-10s %d" % (k, v)
 
 
-
-if __name__ == "__main__":
-
+def aggmon_collector(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument('-C', '--cmd-port', default="tcp://127.0.0.1:5556", action="store", help="RPC command port")
     ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
@@ -314,12 +312,11 @@ if __name__ == "__main__":
     ap.add_argument('-s', '--stats', default=False, action="store_true", help="print statistics info")
     ap.add_argument('-S', '--state-file', default="agg_collector.state", action="store", help="file to store tagger rules and subscriptions")
     ap.add_argument('-v', '--verbose', type=int, default=0, action="store", help="verbosity")
-    pargs = ap.parse_args()
+    pargs = ap.parse_args(argv)
 
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
-
 
     state = []
     subs = {}
@@ -394,6 +391,6 @@ if __name__ == "__main__":
         except Exception as e:
             print "main thread exception: %r" % e
             break
-    
 
-
+if __name__ == "__main__":
+    aggmon_collector(sys.argv)
