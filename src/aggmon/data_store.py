@@ -132,7 +132,7 @@ class DataStore(threading.Thread):
             self.queue.task_done()
 
 
-def aggmon_data_store(argv)
+def aggmon_data_store(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument('-g', '--group', default="universe", action="store", help="group/cluster served by this daemon instance")
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5511", action="store", help="RPC command port")
