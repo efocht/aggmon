@@ -65,7 +65,8 @@ class MongoDBJobList(MongoDBStore):
 
     def addJob( self, metric ):
         try:
-            self.__col_job_list.update( {"name": metric["name"]}, metric, multi=False, upsert=True )
+            self.__col_job_list.update( {"name": metric["name"]},
+                                        metric, multi=False, upsert=True )
         except Exception, e:
             raise Exception( "Failed to add Job to list: %s" % str( e ) )
 
@@ -88,7 +89,8 @@ class MongoDBMetricStore(MongoDBStore):
     """
     Numerical (Ganglia style) metrics
     """
-    def __init__( self, group="/universe", md_col="metric_md", val_col="metric", val_ttl=3600*24*180, **kwds ):
+    def __init__(self, group="/universe", md_col="metric_md", val_col="metric",
+                 val_ttl=3600*24*180, **kwds):
         MongoDBStore.__init__( self, **kwds )
         self._group = group
         self._col_md = self.db[md_col]
@@ -98,12 +100,15 @@ class MongoDBMetricStore(MongoDBStore):
         self._col_val = self.db[self._col_val_name]
         self._val_ttl = val_ttl
         try:
-            # indices for metadata
-            #self._col_md.ensure_index( [("HOST", ASCENDING), ("NAME", ASCENDING), ("CLUSTER", ASCENDING)], unique=True )
+            # index for metadata
             self._col_md.ensure_index( [("hpath", ASCENDING)], unique=True )
             # indices for values
-            self._col_val.ensure_index( [("H", ASCENDING), ("N", ASCENDING), ("T", ASCENDING)], unique=True )
-            self._col_val.ensure_index( [("T", ASCENDING)], unique=False, background=True,
+            self._col_val.ensure_index( [("H", ASCENDING),
+                                         ("N", ASCENDING),
+                                         ("T", ASCENDING)],
+                                        unique=True )
+            self._col_val.ensure_index( [("T", ASCENDING)],
+                                        unique=False, background=True,
                                         expireAfterSeconds=self._val_ttl )
             self._col_val.ensure_index( [("J", ASCENDING)], unique=False, background=True )
         except Exception, e:
@@ -133,8 +138,11 @@ class MongoDBMetricStore(MongoDBStore):
 
 
     def insert_val(self, metric):
-        # make sure the time has proper format such that TTL will expire it eventually
-        metric["T"] = datetime.datetime.fromtimestamp(metric["T"])
+        ## EF: we switch to integer values for the time, i.e. second granularity
+        ##     the datetime type metric takes up too much space in mongodb.
+        ##     Might be that we need to expire old records manually.
+        ## make sure the time has proper format such that TTL will expire it eventually
+        #metric["T"] = datetime.datetime.fromtimestamp(metric["T"])
         return self._col_val.insert( metric )
 
 
@@ -182,7 +190,8 @@ class MongoDBMetricStore(MongoDBStore):
     def current_value( self, metric_name=None, host_name=None ):
         if not isinstance( metric_name, basestring ) or not isinstance( host_name, basestring ):
             return None
-        match = "[{$match: {$and: [{N: \"%s\"}, {H: \"%s\"}]}}, {$sort: {T: -1}}, {$limit: 1}]" % (metric_name, host_name)
+        match = "[{$match: {$and: [{N: \"%s\"}, {H: \"%s\"}]}}, {$sort: {T: -1}}, {$limit: 1}]" % \
+                (metric_name, host_name)
         return self.find_val( match )
 
 
@@ -258,13 +267,17 @@ class MongoDBJobStore(MongoDBStore):
         try:
             # indices for job data
             self._col.ensure_index( [("name", ASCENDING), ("value", ASCENDING)], unique=True )
-            #self._col.ensure_index( [("name", ASCENDING), ("value", ASCENDING)], unique=True, background=True, expireAfterSeconds=self._col_ttl )
+            #self._col.ensure_index( [("name", ASCENDING), ("value", ASCENDING)],
+            #                       unique=True, background=True, expireAfterSeconds=self._col_ttl )
         except Exception, e:
             raise Exception( "Failed to ensure index for collection %s: %s" % (self._col, str( e )) )
 
     def insert(self, metric):
-        # make sure the time has proper format such that TTL will expire it eventually
-        metric["time"] = datetime.datetime.fromtimestamp( metric["time"] )
+        ## EF: we switch to integer values for the time, i.e. second granularity
+        ##     the datetime type metric takes up too much space in mongodb.
+        ##     Might be that we need to expire old records manually.
+        ## make sure the time has proper format such that TTL will expire it eventually
+        #metric["time"] = datetime.datetime.fromtimestamp( metric["time"] )
         return self._col.update( {"name": metric["name"], "value": metric["value"]}, metric, upsert=True )
 
 
@@ -292,15 +305,20 @@ class MongoDBStatusStore(MongoDBStore):
         self._col_ttl = val_ttl
         try:
             # indices for status data
-            self._col.ensure_index( [("name", ASCENDING), ("time", DESCENDING), ("host", ASCENDING)], unique=True )
+            self._col.ensure_index( [("name", ASCENDING),
+                                     ("time", DESCENDING),
+                                     ("host", ASCENDING)],
+                                    unique=True )
             #self._col.ensure_index( [("name", ASCENDING), ("time", DESCENDING), ("host", ASCENDING)], unique=True, background=True, expireAfterSeconds=self._col_ttl )
         except Exception, e:
-            raise Exception( "Failed to ensure index for collection %s: %s" % (self._col, str( e )) )
+            raise Exception("Failed to ensure index for collection %s: %s" % (self._col, str(e)))
 
     def insert(self, metric):
-        # make sure the time has proper format such that TTL will expire it eventually
-        metric["time"] = datetime.datetime.fromtimestamp( metric["time"] )
-        return self._col.update( {"name": metric["name"], "host": metric["host"], "time": metric["time"]}, metric, upsert=True )
+        return self._col.update( {"name": metric["name"],
+                                  "host": metric["host"],
+                                  "time": metric["time"]},
+                                 metric,
+                                 upsert=True )
 
 
     def find( self, match=None, proj=None ):
@@ -320,7 +338,8 @@ class MongoDBStatusStore(MongoDBStore):
 # TODO: delete once the new version is implemented.
 #
 class MongoDBMetricStoreOrig(MongoDBStore):
-    def __init__( self, col_log_metadata="log_metadata", col_job_metric="job_metric", ts_log_prefix="logts", **kwds ):
+    def __init__( self, col_log_metadata="log_metadata", col_job_metric="job_metric",
+                  ts_log_prefix="logts", **kwds ):
         MongoDBStore.__init__( self, **kwds )
         self.__col_log_metadata = self._db[col_log_metadata]
         self.__col_job_metric = self._db[col_job_metric]
@@ -330,8 +349,13 @@ class MongoDBMetricStoreOrig(MongoDBStore):
         self.__col_job_metric_name = col_job_metric
         self.__ts_log_prefix = ts_log_prefix
         try:
-            self.__col_log_metadata.ensure_index( [("host", ASCENDING), ("name", ASCENDING)], unique=True )
-            self.__col_job_metric.ensure_index( [("host", ASCENDING), ("name", ASCENDING), ("value", ASCENDING)], unique=True )
+            self.__col_log_metadata.ensure_index( [("host", ASCENDING),
+                                                   ("name", ASCENDING)],
+                                                  unique=True )
+            self.__col_job_metric.ensure_index( [("host", ASCENDING),
+                                                 ("name", ASCENDING),
+                                                 ("value", ASCENDING)],
+                                                unique=True )
         except Exception, e:
             raise Exception( "Failed to ensure index: %s" % str( e ) )
 
@@ -344,7 +368,8 @@ class MongoDBMetricStoreOrig(MongoDBStore):
                 metric = NMetric( host=new_metric["host"], name=new_metric["name"] )
                 try:
                     _id = self.__col_log_metadata.insert( metric )
-                    self.__db.create_collection( self.__ts_log_prefix + str( _id ), size=(256 * MAX_RECORDS), max=MAX_RECORDS, capped=True )
+                    self.__db.create_collection( self.__ts_log_prefix + str( _id ),
+                                                 size=(256 * MAX_RECORDS), max=MAX_RECORDS, capped=True )
                     metric["ts_record"] = record
                     metric["_id"] = _id
                     self.__db[self.__ts_log_prefix + str( _id )].insert( record )
@@ -366,7 +391,8 @@ class MongoDBMetricStoreOrig(MongoDBStore):
                         self.__col_log_metadata.save( last_metric )
                     except Exception, e:
                         raise Exception( "Failed to insert intermediate Nagios record: %s" % str( e ) )
-                if last_metric["ts_record"]["value"] != new_metric["ts_record"]["value"] or last_metric["ts_record"]["output"] != new_metric["ts_record"]["output"]:
+                if last_metric["ts_record"]["value"] != new_metric["ts_record"]["value"] or \
+                   last_metric["ts_record"]["output"] != new_metric["ts_record"]["output"]:
                     # insert new log TS Record, update metric DBRef
                     record = TSLOGRecord( **new_metric["ts_record"] )
                     metric = NMetric( host=new_metric["host"], name=new_metric["name"] )
@@ -384,12 +410,15 @@ class MongoDBMetricStoreOrig(MongoDBStore):
                         _id = last_metric["_id"]
                         recid = last_metric["ts_record"]["_id"]
                         update = new_metric["ts_record"]["time"]
-                        self.__db[self.__ts_log_prefix + str( _id )].update( {"_id": recid}, {"$set": {"time": update}} )
+                        self.__db[self.__ts_log_prefix +
+                                  str( _id )].update({"_id": recid}, {"$set": {"time": update}})
                     except Exception, e:
                         raise Exception( "Failed to update time in Nagios record: %s" % str( e ) )
         elif isinstance( new_metric, JMetric ):
             try:
-                new_metric_key = {"host": new_metric["host"], "name": new_metric["name"], "value": new_metric["value"]}
+                new_metric_key = {"host": new_metric["host"],
+                                  "name": new_metric["name"],
+                                  "value": new_metric["value"]}
                 self.__col_job_metric.update( new_metric_key, new_metric, upsert=True )
             except Exception, e:
                 raise Exception( "Failed to upsert Job metric: %s" % str( e ) )
@@ -455,8 +484,9 @@ class MongoDBMetricStoreOrig(MongoDBStore):
             return records
         _id = metric["_id"]
         try:
-            records = [TSLOGRecord( **r ) for r in self.__db[self.__ts_log_prefix + str( _id )].find(
-                       {"time": {"$gt": start_s, "$lt": end_s}} )]
+            records = [TSLOGRecord( **r ) for r in
+                       self.__db[self.__ts_log_prefix + str( _id )].find({"time": {"$gt": start_s,
+                                                                                   "$lt": end_s}} )]
         except Exception, e:
             raise Exception("Query failed, %s" % str( e ))
         return records
@@ -464,7 +494,8 @@ class MongoDBMetricStoreOrig(MongoDBStore):
     def current_value( self, metric_name=None, host_name=None ):
         if not isinstance( metric_name, basestring ) or not isinstance( host_name, basestring ):
             return None
-        match = "[{$match: {$and: [{N: \"%s\"}, {H: \"%s\"}]}}, {$sort: {T: -1}}, {$limit: 1}]" % (metric_name, host_name)
+        match = "[{$match: {$and: [{N: \"%s\"}, {H: \"%s\"}]}}, {$sort: {T: -1}}, {$limit: 1}]" % \
+                (metric_name, host_name)
         return self.find( match )
 
     def percentiles( self, metric_name=None, host_names=None, time_s=None, dmax=(15 * 60)):

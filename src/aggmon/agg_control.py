@@ -81,7 +81,7 @@ config = {
     "services": {
         "collector": {
             "cwd": os.getcwd(),
-            "cmd": "python agg_collector.py --cmd-port %(cmdport)s --listen %(listen)s " +
+            "cmd": "agg_collector --cmd-port %(cmdport)s --listen %(listen)s " +
             "--group %(group_path)s --state-file %(statefile)s --dispatcher %(dispatcher)s",
             "cmdport_range": "5100-5199",
             "component_key": ["group", "host"],
@@ -90,7 +90,7 @@ config = {
         },
         "data_store": {
             "cwd": os.getcwd(),
-            "cmd": "python data_store.py --cmd-port %(cmdport)s --listen %(listen)s " +
+            "cmd": "agg_datastore --cmd-port %(cmdport)s --listen %(listen)s " +
             "--dbname \"%(dbname)s\" --host \"%(dbhost)s\" " +
             "--group %(group_path)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
             "cmdport_range": "5100-5199",
@@ -100,7 +100,7 @@ config = {
         },
         "job_agg": {
             "cwd": os.getcwd(),
-            "cmd": "python agg_job_agg.py --cmd-port %(cmdport)s --listen %(listen)s " +
+            "cmd": "agg_jobagg --cmd-port %(cmdport)s --listen %(listen)s " +
             "--jobid %(jobid)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
             "cmdport_range": "5000-5999",
             "component_key":  ["jobid"],
@@ -240,36 +240,31 @@ def do_aggregate(jobid, agg_cfg):
     """
     Generate and send Aggregate Metrics commands according to an agg_cfg dict.
     Example cfg:
-        { "push_target": "@TOP_STORE",
-          "interval": 120,
-          "agg_method": "avg",
-          "ttl": 120,
-          "agg_metric_name": "%(metric)s_%(agg_type)s",
-          "metrics": ["load_one"]
-      }
+    { "push_target": "@TOP_STORE",
+      "interval": 120,
+      "agg_method": "avg",
+      "ttl": 120,
+      "agg_metric_name": "%(metric)s_%(agg_method)s",
+      "metrics": ["load_one"] }
     """
     log.debug("do_aggregate jobid=%s cfg=%r" % (jobid, agg_cfg))
     push_target_uri = get_push_target(agg_cfg["push_target"])
     if push_target_uri is None:
         log.error("push_target could not be resolved for agg_cfg=%r" % agg_cfg)
         return None
+    agg_cfg["push_target"] = push_target_uri
     jagg_port = get_job_agg_port(jobid)
     if jagg_port is None:
         log.error("job_agg for jobid %s not found." % jobid)
         return None
-    agg_type = agg_cfg["agg_method"]
-    for metric in agg_cfg["metrics"]:
-        agg_metric = agg_cfg["agg_metric_name"] % locals()
-        kwds = {"metric": metric,
-                "agg_metric": agg_metric,
-                "agg_method": agg_type,
-                "push_target": push_target_uri}
-        if "ttl" in agg_cfg:
-            kwds["ttl"] = agg_cfg["ttl"]
-        send_agg_command(zmq_context, jagg_port, "agg", **kwds)
+    send_agg_command(zmq_context, jagg_port, "agg", **agg_cfg)
 
 
 def make_timers(jobid):
+    """
+    Create one timer for each aggregator config. An aggregator config can
+    trigger the aggregation of multiple metrics.
+    """
     global aggregate, jagg_timers
 
     timers = []
