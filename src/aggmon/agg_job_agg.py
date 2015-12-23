@@ -82,29 +82,28 @@ class JobAggregator(threading.Thread):
         self.daemon = True
 
     def do_aggregate_and_send(self, cmd):
-        metric = cmd["metric"]
-        agg_metric = cmd["agg_metric"]
-        push_target = cmd["push_target"]
-        agg_type = cmd["agg_type"]
-        ttl = None
-        if "ttl" in cmd:
-            ttl = cmd["ttl"]
-        now = time.time()
-        values = []
-        if metric not in self.metric_caches:
-            return None
-        for host in self.metric_caches[metric]:
-            t, v = self.metric_caches[metric][host]
-            if ttl is not None:
-                if t < now - ttl:
+        for metric in cmd["metrics"]:
+            # TODO: add regexp case
+            agg_method = cmd["agg_method"]
+            push_target = cmd["push_target"]
+            agg_metric = cmd["agg_metric_name"] % locals()
+            ttl = None
+            if "ttl" in cmd:
+                ttl = cmd["ttl"]
+            now = int(time.time())
+
+            values = []
+            if metric not in self.metric_caches:
+                continue
+            for host in self.metric_caches[metric]:
+                t, v = self.metric_caches[metric][host]
+                if ttl is not None and t < now - ttl:
                     continue
-            values.append(v)
-        agg_value = aggs.aggregate(agg_type, values)
-        log.debug("agg_value = %r" % agg_value)
-        metric = {"N": agg_metric, "J": self.jobid, "T": round(now, 2), "V": agg_value}
-        log.debug("agg metric = %r" % metric)
-        log.debug("pushing metric to %s" % push_target)
-        return self.zmq_push.send(push_target, metric)
+                values.append(v)
+            agg_value = aggs.aggregate(agg_method, values)
+            metric = {"N": agg_metric, "J": self.jobid, "T": now, "V": agg_value}
+            log.debug("agg metric = %r, pushing it to %s" % (metric, push_target))
+            rc = self.zmq_push.send(push_target, metric)
 
     def run(self):
         log.info( "[Started JobAggregator Thread]" )

@@ -1,0 +1,11 @@
+#!/bin/sh
+LOG=gmond_killed.log
+GMOND_CONF=../aggmon/gmond_bar.conf
+while true; do
+    export ZMQ_COLLECTOR=`agg_cmd raw get_component_state | json -a collector | \
+                          json -e 'for (key in this) if (key!="key") {this["xyz"]=this[key];};' | \
+                          json xyz.cmd_port`
+    gmond -c $GMOND_CONF
+    echo "gmond killed at "`date` >> $LOG
+done
+

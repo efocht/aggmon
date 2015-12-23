@@ -127,7 +127,7 @@ class DataStore(threading.Thread):
                     log.debug( "inserted %r" % val )
                     self.v_cache.set(val["H"], val["N"], val["T"])
             except Exception as e:
-                log.error( "Exception in mongo_store req worker: %r, %r" % (e, val) )
+                log.error( "Exception in data_store req worker: %r, %r" % (e, val) )
 
             self.queue.task_done()
 
