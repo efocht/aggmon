@@ -465,7 +465,7 @@ def aggmon_control(argv):
     
     ap = argparse.ArgumentParser()
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5556", action="store", help="RPC command port")
-    ap.add_argument('-c', '--config', default="config.d", action="store", help="configuration directory")
+    ap.add_argument('-c', '--config', default="../../config.d", action="store", help="configuration directory")
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
     ap.add_argument('-S', '--state-file', default="agg_control.state", action="store", help="file to store state")
     ap.add_argument('-k', '--kill', default=False, action="store_true", help="kill components that were left running")
