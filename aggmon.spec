@@ -31,8 +31,8 @@ install -m 644 src/metric_store/mongodb_store.py %{buildroot}/%{python_sitelib}/
 install -m 644 src/metric_store/mongodb_store.pyc %{buildroot}/%{python_sitelib}/metric_store/
 install -m 644 src/metric_store/__init__.py %{buildroot}/%{python_sitelib}/metric_store/
 install -m 644 src/metric_store/__init__.pyc %{buildroot}/%{python_sitelib}/metric_store/
-install -m 644 src/aggmon/module-quantiles/quantiles.so %{buildroot}/%{python_sitelib}/
-for P in src/bin/agg_*; do
+install -m 644 src/aggmon/module-quantiles/quantiles.so %{buildroot}/%{python_sitelib}/aggmon/
+for P in bin/agg_*; do
     install -m 755 "$P" %{buildroot}%{_bindir}
 done
 for P in src/aggmon/agg_*.py* \
@@ -46,7 +46,6 @@ rm -rf %{buildroot}
 
 %files
 %defattr(-, root, root)
-%{python_sitelib}/*.so
 %{python_sitelib}/aggmon/*
 %{_bindir}/*
 
