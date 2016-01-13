@@ -17,6 +17,14 @@ def get_kwds(**kwds):
     return kwds
 
 
+# equivalent of the UNIX 'which' command
+def which(file):
+    for path in os.environ["PATH"].split(os.pathsep):
+        if os.path.exists(os.path.join(path, file)):
+                return os.path.join(path, file)
+    return None
+
+
 def component_key(keys, kwds):
     key = []
     for k in keys:
@@ -122,6 +130,7 @@ class ComponentStatesRepo(object):
         svc_info = self.config["services"][service]
         cwd = svc_info["cwd"]
         cmd = svc_info["cmd"]
+        cmd_opts = svc_info["cmd_opts"]
         if "cmdport_range" in svc_info:
             cmdport = "tcp://0.0.0.0:%s" % svc_info["cmdport_range"]
         if "listen_port_range" in svc_info:
@@ -135,7 +144,9 @@ class ComponentStatesRepo(object):
             self.component_start_cb[key] = {"cb": __CALLBACK, "args": __CALLBACK_ARGS}
         for host in nodes:
             try:
-                cmd = cmd % locals()
+                cmd = which(cmd)
+                cmd_opts = cmd_opts % locals()
+                cmd = cmd + " " + cmd_opts
                 exec_cmd = self.config["global"]["remote_cmd"] % locals()
                 log.info("starting subprocess: %s" % exec_cmd)
                 out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
