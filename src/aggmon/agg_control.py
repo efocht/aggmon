@@ -81,7 +81,8 @@ config = {
     "services": {
         "collector": {
             "cwd": os.getcwd(),
-            "cmd": "agg_collector --cmd-port %(cmdport)s --listen %(listen)s " +
+            "cmd": "agg_collector",
+            "cmd_opts": "--cmd-port %(cmdport)s --listen %(listen)s " +
             "--group %(group_path)s --state-file %(statefile)s --dispatcher %(dispatcher)s",
             "cmdport_range": "5100-5199",
             "component_key": ["group", "host"],
@@ -90,7 +91,8 @@ config = {
         },
         "data_store": {
             "cwd": os.getcwd(),
-            "cmd": "agg_datastore --cmd-port %(cmdport)s --listen %(listen)s " +
+            "cmd": "agg_datastore",
+            "cmd_opts": "--cmd-port %(cmdport)s --listen %(listen)s " +
             "--dbname \"%(dbname)s\" --host \"%(dbhost)s\" " +
             "--group %(group_path)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
             "cmdport_range": "5100-5199",
@@ -100,7 +102,8 @@ config = {
         },
         "job_agg": {
             "cwd": os.getcwd(),
-            "cmd": "agg_jobagg --cmd-port %(cmdport)s --listen %(listen)s " +
+            "cmd": "agg_jobagg",
+            "cmd_opts": "--cmd-port %(cmdport)s --listen %(listen)s " +
             "--jobid %(jobid)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
             "cmdport_range": "5000-5999",
             "component_key":  ["jobid"],
@@ -207,6 +210,7 @@ def load_config( config_file ):
 
 
 def get_collectors_cmd_ports():
+    global component_states
     cmd_ports = []
     pubs = component_states.get_state({"component": "collector"})
     if pubs is not None:
@@ -216,6 +220,7 @@ def get_collectors_cmd_ports():
 
 
 def get_job_agg_port(jobid):
+    global component_states
     state = component_states.get_state({"component": "job_agg", "jobid": jobid})
     if state is not None and "listen" in state:
         return state["listen"]
@@ -229,6 +234,7 @@ def get_top_level_group():
 
 
 def get_push_target(name):
+    global component_states
     if name == "@TOP_STORE":
         top_group = get_top_level_group()
         top_store_state = component_states.get_state({"component": "data_store", "group": top_group})
@@ -290,7 +296,7 @@ def msg_tag_num_hosts(msg):
 
 
 def create_job_agg_instance(jobid):
-    global me_rpc
+    global me_rpc, component_states
 
     jagg = component_states.get_state({"component": "job_agg", "jobid": jobid})
     if jagg is not None and len(jagg) > 0:
@@ -304,7 +310,7 @@ def create_job_agg_instance(jobid):
 
 
 def remove_job_agg_instance(jobid):
-    global zmq_context
+    global zmq_context, component_states, jagg_timers
 
     if jobid in jagg_timers:
         # kill timer if it exists
@@ -351,6 +357,7 @@ def relay_to_collectors(context, cmd, msg):
 
 
 def make_timers_and_save(msg, component_states, state_file):
+    global jagg_timers
     log.info("make_timers_and_save")
     if "component" in msg and msg["component"] == "job_agg":
         jobid = msg["jobid"]
@@ -370,7 +377,7 @@ def start_fixups(program_restart=False, program_start=False):
     :return: True if successful, False otherwise
     """
 
-    global config, job_list, zmq_context
+    global config, job_list, zmq_context, component_states
 
     num_collectors = 0
     num_collectors_started = 0
@@ -462,10 +469,12 @@ def start_fixups(program_restart=False, program_start=False):
 
 
 def aggmon_control(argv):
+
+    global component_states, zmq_context, me_rpc, job_list
     
     ap = argparse.ArgumentParser()
-    ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5556", action="store", help="RPC command port")
-    ap.add_argument('-c', '--config', default="../../config.d", action="store", help="configuration directory")
+    ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5558", action="store", help="RPC command port")
+    ap.add_argument('-c', '--config', default="../config.d", action="store", help="configuration directory")
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
     ap.add_argument('-S', '--state-file', default="agg_control.state", action="store", help="file to store state")
     ap.add_argument('-k', '--kill', default=False, action="store_true", help="kill components that were left running")

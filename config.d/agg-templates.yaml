@@ -2,7 +2,7 @@ agg-templates:
      default:
          agg_class:       job
          interval:        120
-         agg_method:      avg
+         agg_type:        avg
          ttl:             120
 
      long-interval:
