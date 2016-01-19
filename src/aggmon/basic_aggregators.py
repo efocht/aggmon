@@ -88,7 +88,7 @@ class Quantiles(object):
         return self._mean
 
 
-from quantiles import Quantiles as CQuantiles
+from aggmon.quantiles import Quantiles as CQuantiles
 def aggregate( agg, values ):
     value = None
     if agg == "worst":
