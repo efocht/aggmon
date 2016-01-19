@@ -442,6 +442,9 @@ def start_fixups(program_restart=False, program_start=False):
         log.info("fixup job_aggs: %r" % job_list)
         for j in job_list:
             jobid = j["name"]
+            if "cnodes" not in j:
+                log.warning("fixup job_aggs: skipping job without nodes! jobid=%s" % jobid)
+                continue
             log.info("fixup: jobid %s" % jobid)
             if jobid not in jaggs:
                 # start aggregators for new jobs
