@@ -8,7 +8,7 @@ LINKLIBS = -L$(PYLIBDIR) $(shell python-config --libs) -lboost_python -ldl
 CFLAGS = -I./
 #CFLAGS += -H -DDEBUG -ggdb
 CFLAGS += -fPIC -O2
-CFLAGS += -std=c++11
+#CFLAGS += -std=c++11
 LDFLAGS = -shared -lc -Wl,-soname,$(SONAME),-rpath,$(PYLIBDIR)
 #LDFLAGS += -ggdb
 CC = g++
@@ -27,7 +27,7 @@ clean:
 	rm -f *.o *.so *.pyc $(SONAME)
 
 check:
-	@for L in gcc gcc-c++ python-devel boost_python; do \
+	@for L in gcc gcc-c++ python-devel boost-python; do \
 	    if ! rpm -qa | grep -q $$L; then \
 	        echo "Package $$L missing!"; \
 	    fi; \
