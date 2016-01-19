@@ -13,7 +13,7 @@
    \endverbatim
  */
 
-#include "python2.7/Python.h"
+#include <Python.h>
 #include "Quantiles.h"
 #include <algorithm>
 

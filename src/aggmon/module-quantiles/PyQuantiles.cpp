@@ -56,7 +56,7 @@ class PyQuantiles : public Quantiles {
 };
 
 // BOOST wrapper
-#include <python2.7/Python.h>
+#include <Python.h>
 #include <boost/python/module.hpp>
 #include <boost/python/suite/indexing/vector_indexing_suite.hpp>
 
