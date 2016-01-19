@@ -134,7 +134,7 @@ class JobAggregator(threading.Thread):
                     cmdlist = msg["_COMMAND_"]
                     # execute it, means: do some aggregation
                     if cmdlist["cmd"] == "agg":
-                        self.do_aggregate_and_send(cmd)
+                        self.do_aggregate_and_send(cmdlist)
 
                 elif "V" in msg:
                     # this is a value message
