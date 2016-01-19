@@ -254,11 +254,13 @@ def do_aggregate(jobid, agg_cfg):
       "metrics": ["load_one"] }
     """
     log.debug("do_aggregate jobid=%s cfg=%r" % (jobid, agg_cfg))
-    push_target_uri = get_push_target(agg_cfg["push_target"])
+    push_target_uri = agg_cfg["push_target"]
+    if push_target_uri.startswith("@"):
+        push_target_uri = get_push_target(agg_cfg["push_target"])
+        agg_cfg["push_target"] = push_target_uri
     if push_target_uri is None:
         log.error("push_target could not be resolved for agg_cfg=%r" % agg_cfg)
         return None
-    agg_cfg["push_target"] = push_target_uri
     jagg_port = get_job_agg_port(jobid)
     if jagg_port is None:
         log.error("job_agg for jobid %s not found." % jobid)
