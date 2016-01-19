@@ -83,7 +83,7 @@ def tags_show(context, server):
 
 def aggmon_cmd(argv):
     ap = argparse.ArgumentParser()
-    ap.add_argument('-C', '--cmd-port', default="tcp://127.0.0.1:5556", action="store", help="RPC command port")
+    ap.add_argument('-C', '--cmd-port', default="tcp://127.0.0.1:5558", action="store", help="RPC command port")
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
     ap.add_argument('-v', '--verbose', default=False, action="store_true", help="verbosity")
 
