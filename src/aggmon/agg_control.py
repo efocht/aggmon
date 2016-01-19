@@ -253,19 +253,20 @@ def do_aggregate(jobid, agg_cfg):
       "agg_metric_name": "%(metric)s_%(agg_method)s",
       "metrics": ["load_one"] }
     """
-    log.debug("do_aggregate jobid=%s cfg=%r" % (jobid, agg_cfg))
-    push_target_uri = agg_cfg["push_target"]
+    cfg = copy.copy(agg_cfg)
+    log.debug("do_aggregate jobid=%s cfg=%r" % (jobid, cfg))
+    push_target_uri = cfg["push_target"]
     if push_target_uri.startswith("@"):
-        push_target_uri = get_push_target(agg_cfg["push_target"])
-        agg_cfg["push_target"] = push_target_uri
+        push_target_uri = get_push_target(push_target_uri)
+        cfg["push_target"] = push_target_uri
     if push_target_uri is None:
-        log.error("push_target could not be resolved for agg_cfg=%r" % agg_cfg)
+        log.error("push_target could not be resolved for agg_cfg=%r" % cfg)
         return None
     jagg_port = get_job_agg_port(jobid)
     if jagg_port is None:
         log.error("job_agg for jobid %s not found." % jobid)
         return None
-    send_agg_command(zmq_context, jagg_port, "agg", **agg_cfg)
+    send_agg_command(zmq_context, jagg_port, "agg", **cfg)
 
 
 def make_timers(jobid):
