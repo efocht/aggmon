@@ -94,7 +94,7 @@ def aggregate( agg, values ):
     if agg == "worst":
         states = []
         for value in values:
-            m = TRISTATE_MATCH.match( value["value"].upper() )
+            m = TRISTATE_MATCH.match( value.upper() )
             if m is not None:
                 states.append( m.group(1) )
         result, output = tristate_aggregate( states )
@@ -105,9 +105,10 @@ def aggregate( agg, values ):
         for element in values:
             if element is None:
                 continue
-            v.append( element["value"] )
+            v.append( element )
+        log.debug("quant10: v=%r" % v)
         q = CQuantiles( v )
-        value = (q.quantiles(), q.mean())
+        value = [q.quantiles(), q.mean()]
     else:
         #
         # and now the RRD metrics
@@ -116,11 +117,10 @@ def aggregate( agg, values ):
         _sum = 0.0
         _min = 1e+32
         _max = -_min
-        for element in values:
-            if element is None:
+        for value in values:
+            if value is None:
                 continue
             n += 1
-            value = element["value"]
             if agg in ("sum", "avg"):
                 _sum += value
             elif agg == "max":

@@ -54,6 +54,7 @@ class AggPubMatch(object):
     def publish(self, msg):
         jmsg = json.dumps(msg)
         targets = self.match(msg)
+        log.debug("publishing msg %r to targets %r" % (msg, targets))
         for target in targets:
             sock = self.send_socket[target]
             if not target in self.socket_conn:
@@ -150,7 +151,7 @@ class AggPubThread(threading.Thread, AggPubMatch):
         AggPubMatch.__init__(self, zmq_context, subs=subs)
 
     def run(self):
-        print "[Started AggPubThread]"
+        log.info("[Started AggPubThread]")
         count = 0
         while not self.stopping:
             try:
@@ -176,7 +177,7 @@ class AggPubThread(threading.Thread, AggPubMatch):
             try:
                 if self.tagger is not None:
                     msg = self.tagger(msg)
-                log.debug( "publishing msg: %r" % msg )
+                #log.debug( "publishing msg: %r" % msg )
                 self.publish(msg)
                 if count == 0:
                     tstart = time.time()
@@ -222,8 +223,8 @@ class SubscriberQueue(threading.Thread):
         while not self.stopping:
             try:
                 s = self.receiver.recv()
-                #print "received:", s
                 msg = json.loads(s)
+                #log.debug("received: %r" % msg)
 
                 if self.pre is not None:
                     msg = self.pre(msg)
@@ -241,9 +242,9 @@ class SubscriberQueue(threading.Thread):
                         sys.stdout.write("Msg is %r\ncount = %d" % (msg, count))
                     sys.stdout.flush()
             except Exception as e:
-                print "Exception in msg receiver: %r" % e
+                log.error("Exception in msg receiver: %r" % e)
                 break
-        print "%d messages received" % count
+        log.info("%d messages received" % count)
 
 
 

@@ -222,10 +222,10 @@ class ComponentStatesRepo(object):
         key = component_key(self.config["services"][component]["component_key"], msg)
         started = None
         if key in self.repo[component]:
-            log.info("set_state: updating state for %s %s" % (component, key))
+            log.debug("set_state: updating state for %s %s" % (component, key))
             started = self.repo[component][key]["started"]
         else:
-            log.info("set_state: setting state for %s %s" % (component, key))
+            log.debug("set_state: setting state for %s %s" % (component, key))
         msg["last_update"] = time.time()
         if started is not None:
             if started != msg["started"]:
