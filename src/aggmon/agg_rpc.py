@@ -20,12 +20,12 @@ def send_rpc(zmq_context, rpc_server, cmd, **kwds):
     """
     socket = zmq_context.socket(zmq.REQ)
     poller = zmq.Poller()
-    log.debug("connecting to %s" % rpc_server)
+    #log.debug("connecting to %s" % rpc_server)
     socket.connect(rpc_server)
     poller.register(socket)
     kwds["CMD"] = cmd
     msg = json.dumps(kwds)
-    log.info("sending to %s RPC msg: %r" % (rpc_server, msg))
+    log.debug("sending to %s RPC msg: %r" % (rpc_server, msg))
     socket.send(msg, flags=zmq.NOBLOCK)
     try:
         events = poller.poll( timeout=RPC_TIMEOUT )
@@ -37,7 +37,7 @@ def send_rpc(zmq_context, rpc_server, cmd, **kwds):
             log.debug("received result msg: %r" % reply)
             if "RESULT" in reply:
                 return reply["RESULT"]
-    log.debug("disconnecting from %s" % rpc_server)
+    #log.debug("disconnecting from %s" % rpc_server)
     socket.disconnect(rpc_server)
     socket.close()
 
@@ -131,7 +131,7 @@ class RPCThread(threading.Thread):
             try:
                 s = self.responder.recv()
                 msg = json.loads(s)
-                log.info( "rpc_server received: %r" % msg )
+                log.debug( "rpc_server received: %r" % msg )
                 if "CMD" in msg:
                     res = "UNKNOWN"
                     cmd = msg["CMD"]

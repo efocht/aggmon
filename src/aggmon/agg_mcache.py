@@ -16,6 +16,9 @@ class MCache(object):
             return self.cache[key]
         return None
 
+    def items(self):
+        return self.cache.items()
+
     def set(self, *args):
         # the value is the last argument in the list
         args = list(args)

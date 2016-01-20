@@ -61,7 +61,6 @@ class ZMQ_Push(object):
     def send(self, target, msg):
         if target not in self.send_socket:
             self.sock_connect(target)
-        self.send_socket[target].send(msg)
         jmsg = json.dumps(msg)
         try:
             self.send_socket[target].send_string(jmsg, flags=zmq.NOBLOCK)
@@ -82,9 +81,11 @@ class JobAggregator(threading.Thread):
         self.daemon = True
 
     def do_aggregate_and_send(self, cmd):
+        log.debug("do_aggregate_and_send: cmd = %r" % cmd)
         for metric in cmd["metrics"]:
+            log.debug("do_aggregate_and_send: metric = %s" % metric)
             # TODO: add regexp case
-            agg_method = cmd["agg_method"]
+            agg_type = cmd["agg_type"]
             push_target = cmd["push_target"]
             agg_metric = cmd["agg_metric_name"] % locals()
             ttl = None
@@ -94,13 +95,16 @@ class JobAggregator(threading.Thread):
 
             values = []
             if metric not in self.metric_caches:
+                log.debug("metric '%s' not found in metric_caches!" % metric)
                 continue
-            for host in self.metric_caches[metric]:
-                t, v = self.metric_caches[metric][host]
+            for host, val in self.metric_caches[metric].items():
+                t, v = val
                 if ttl is not None and t < now - ttl:
                     continue
                 values.append(v)
-            agg_value = aggs.aggregate(agg_method, values)
+            log.debug("calling aggregate: agg_type=%s, values=%r" % (agg_type, values))
+            agg_value = aggs.aggregate(agg_type, values)
+            log.debug("aggregate returned: %r" % agg_value)
             metric = {"N": agg_metric, "J": self.jobid, "T": now, "V": agg_value}
             log.debug("agg metric = %r, pushing it to %s" % (metric, push_target))
             rc = self.zmq_push.send(push_target, metric)
@@ -128,8 +132,8 @@ class JobAggregator(threading.Thread):
                 #
                 # do the work
                 #
-                log.debug("job_agg: msg = %r" % msg)
                 if "_COMMAND_" in msg:
+                    log.debug("job_agg: msg = %r" % msg)
                     # this must be a command record
                     cmdlist = msg["_COMMAND_"]
                     # execute it, means: do some aggregation
@@ -137,14 +141,15 @@ class JobAggregator(threading.Thread):
                         self.do_aggregate_and_send(cmdlist)
 
                 elif "V" in msg:
+                    #log.debug("value message: %r" % msg)
                     # this is a value message
                     metric = msg["N"]
                     # add it to the cache
                     if metric not in self.metric_caches:
                         log.debug("job_agg: creating mcache for metric '%s'" % metric)
                         self.metric_caches[metric] = MCache()
-                    val = (msg["T"], msg["V"])
-                    log.debug("job_agg: inserting %r to cache" % val)
+                    val = (msg["T"], msg["V"],)
+                    #log.debug("job_agg: inserting %r to cache" % (val,))
                     self.metric_caches[metric].set(msg["H"], val)
 
             except Exception as e:
@@ -227,7 +232,7 @@ def aggmon_jobagg(argv):
     while True:
         try:
             s = receiver.recv()
-            log.debug("received msg on PULL port: %r" % s)
+            #log.debug("received msg on PULL port: %r" % s)
             msg = ujson.loads(s)
 
             cmd = None

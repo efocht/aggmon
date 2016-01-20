@@ -5,10 +5,10 @@ __all__ = ["RepeatTimer"]
 
 
 class RepeatTimer(object):
-    def __init__(self, interval, function, *args, **kwargs):
+    def __init__(self, _interval, _function, *args, **kwargs):
         self._timer     = None
-        self.interval   = interval
-        self.function   = function
+        self.interval   = _interval
+        self.function   = _function
         self.args       = args
         self.kwargs     = kwargs
         self.is_running = False

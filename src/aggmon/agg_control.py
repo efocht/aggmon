@@ -103,7 +103,7 @@ config = {
         "job_agg": {
             "cwd": os.getcwd(),
             "cmd": "agg_jobagg",
-            "cmd_opts": "--cmd-port %(cmdport)s --listen %(listen)s " +
+            "cmd_opts": "--cmd-port %(cmdport)s --listen %(listen)s --log debug " +
             "--jobid %(jobid)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
             "cmdport_range": "5000-5999",
             "component_key":  ["jobid"],
@@ -207,6 +207,8 @@ def load_config( config_file ):
             agg.update(tpl)
         agg.update(orig_attrs)
 
+    log.info("load_config: config=%r" % config)
+    log.info("load_config: aggregate=%r" % aggregate)
 
 
 def get_collectors_cmd_ports():
@@ -242,18 +244,18 @@ def get_push_target(name):
             return top_store_state["listen"]
 
 
-def do_aggregate(jobid, agg_cfg):
+def do_aggregate(jobid, **cfg):
     """
     Generate and send Aggregate Metrics commands according to an agg_cfg dict.
     Example cfg:
     { "push_target": "@TOP_STORE",
       "interval": 120,
-      "agg_method": "avg",
+      "agg_type": "avg",
       "ttl": 120,
       "agg_metric_name": "%(metric)s_%(agg_method)s",
       "metrics": ["load_one"] }
     """
-    cfg = copy.copy(agg_cfg)
+    #cfg = copy.copy(agg_cfg)
     log.debug("do_aggregate jobid=%s cfg=%r" % (jobid, cfg))
     push_target_uri = cfg["push_target"]
     if push_target_uri.startswith("@"):
@@ -280,7 +282,7 @@ def make_timers(jobid):
     for cfg in aggregate:
         if cfg["agg_class"] == "job":
             interval = cfg["interval"]
-            t = RepeatTimer(interval, do_aggregate, jobid, cfg)
+            t = RepeatTimer(interval, do_aggregate, *[jobid], **cfg)
             timers.append(t)
     jagg_timers[jobid] = timers
 
@@ -361,7 +363,7 @@ def relay_to_collectors(context, cmd, msg):
 
 def make_timers_and_save(msg, component_states, state_file):
     global jagg_timers
-    log.info("make_timers_and_save")
+    log.debug("make_timers_and_save")
     if "component" in msg and msg["component"] == "job_agg":
         jobid = msg["jobid"]
         if jobid not in jagg_timers:
