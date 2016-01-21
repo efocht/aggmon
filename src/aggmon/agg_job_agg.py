@@ -193,6 +193,9 @@ def aggmon_jobagg(argv):
     assert(recv_port is not None)
 
 
+    def aggregate_rpc(msg):
+        jagg.do_aggregate_and_send(msg)
+
     def subscribe_collectors(__msg):
         for msgb in pargs.msgbus:
             log.info( "subscribing to msgs of job %s at %s" % (pargs.jobid, msgb) )
@@ -211,6 +214,7 @@ def aggmon_jobagg(argv):
 
     rpc = RPCThread(context, listen=pargs.cmd_port)
     rpc.start()
+    rpc.register_rpc("agg", aggregate_rpc)
     rpc.register_rpc("quit", unsubscribe_and_quit)
     rpc.register_rpc("resubscribe", subscribe_collectors)
 
