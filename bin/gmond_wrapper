@@ -1,11 +1,38 @@
 #!/bin/sh
+
 LOG=${LOG:-gmond_killed.log}
 GMOND_CONF=${GMOND_CONF:-../ganglia-gmond/gmond_bare.conf}
-while true; do
-    export ZMQ_COLLECTOR=`agg_cmd raw get_component_state | json -a collector | \
-                          json -e 'for (key in this) if (key!="key") {this["xyz"]=this[key];};' | \
-                          json xyz.listen`
-    gmond -c $GMOND_CONF
-    echo "gmond killed at "`date` >> $LOG
-done
 
+PID=
+cleanup() {
+    if [ -n "$PID" ]; then
+        kill $PID && echo "gmond killed at "`date` >> $LOG
+    fi
+    exit 0
+}
+
+get_listen_port() {
+    o=`agg_cmd raw get_component_state 2>/dev/null`
+    if [ $? -ne 0 ]; then
+        echo
+    else
+        echo $o | json -a collector | \
+            json -e 'for (key in this) if (key!="key") {this["xyz"]=this[key];};' | \
+            json xyz.listen
+    fi
+}
+
+trap cleanup INT KILL HUP
+
+while true; do
+    export ZMQ_COLLECTOR=`get_listen_port`
+    if [ "$OLD_COLL" != "$ZMQ_COLLECTOR" ]; then
+        if [ -n "$PID" ]; then
+            kill $PID && echo "gmond killed at "`date` >> $LOG
+        fi
+        gmond -c $GMOND_CONF >>$LOG 2>&1 &
+        PID=$!
+        OLD_COLL=$ZMQ_COLLECTOR
+    fi
+    sleep 60
+done
