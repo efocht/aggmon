@@ -11,7 +11,6 @@ import time
 import zmq
 from agg_component import ComponentStatesRepo, group_name
 from agg_rpc import send_rpc, zmq_own_addr_for_uri, RPCThread
-from agg_job_command import send_agg_command
 from repeat_timer import RepeatTimer
 # Path Fix
 sys.path.append(
@@ -207,9 +206,6 @@ def load_config( config_file ):
             agg.update(tpl)
         agg.update(orig_attrs)
 
-    log.info("load_config: config=%r" % config)
-    log.info("load_config: aggregate=%r" % aggregate)
-
 
 def get_collectors_cmd_ports():
     global component_states
@@ -224,8 +220,8 @@ def get_collectors_cmd_ports():
 def get_job_agg_port(jobid):
     global component_states
     state = component_states.get_state({"component": "job_agg", "jobid": jobid})
-    if state is not None and "listen" in state:
-        return state["listen"]
+    if state is not None and "cmd_port" in state:
+        return state["cmd_port"]
 
 
 def get_top_level_group():
@@ -244,7 +240,7 @@ def get_push_target(name):
             return top_store_state["listen"]
 
 
-def do_aggregate(jobid, **cfg):
+def do_aggregate(jobid, zmq_context, **cfg):
     """
     Generate and send Aggregate Metrics commands according to an agg_cfg dict.
     Example cfg:
@@ -268,7 +264,7 @@ def do_aggregate(jobid, **cfg):
     if jagg_port is None:
         log.error("job_agg for jobid %s not found." % jobid)
         return None
-    send_agg_command(zmq_context, jagg_port, "agg", **cfg)
+    result = send_rpc(zmq_context, jagg_port, "agg", **cfg)
 
 
 def make_timers(jobid):
@@ -276,13 +272,13 @@ def make_timers(jobid):
     Create one timer for each aggregator config. An aggregator config can
     trigger the aggregation of multiple metrics.
     """
-    global aggregate, jagg_timers
+    global aggregate, jagg_timers, zmq_context
 
     timers = []
     for cfg in aggregate:
         if cfg["agg_class"] == "job":
             interval = cfg["interval"]
-            t = RepeatTimer(interval, do_aggregate, *[jobid], **cfg)
+            t = RepeatTimer(interval, do_aggregate, *[jobid, zmq_context], **cfg)
             timers.append(t)
     jagg_timers[jobid] = timers
 
@@ -486,6 +482,8 @@ def aggmon_control(argv):
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
     ap.add_argument('-S', '--state-file', default="agg_control.state", action="store", help="file to store state")
     ap.add_argument('-k', '--kill', default=False, action="store_true", help="kill components that were left running")
+    ap.add_argument('-q', '--quick', default=False, action="store_true",
+                    help="kill components that were left running quickly, without waiting for 70s")
     ap.add_argument('-w', '--wait', default=False, action="store_true", help="wait for 70s even if no state file was found")
     ap.add_argument('-v', '--verbose', type=int, default=0, action="store", help="verbosity")
     pargs = ap.parse_args(argv)
@@ -524,9 +522,10 @@ def aggmon_control(argv):
 
     if pargs.kill:
         if res is not None or pargs.wait:
-            log.info("... waiting 70 seconds for state messages to come in ...")
-            time.sleep(70)
-            log.info("killing components that were found running...")
+            if not pargs.quick:
+                log.info("... waiting 70 seconds for state messages to come in ...")
+                time.sleep(70)
+                log.info("killing components that were found running...")
             component_states.kill_components(["collector", "data_store", "job_agg"])
             time.sleep(10)
         sys.exit(0)
