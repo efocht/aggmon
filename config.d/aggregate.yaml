@@ -13,4 +13,4 @@ agg:
       agg_type:        quant10
       ttl:             180
       agg_metric_name: "%(metric)s_%(agg_type)s"
-      metrics:         [load_one]
+      metrics:         RE:likwid_.*
