@@ -13,7 +13,7 @@ cleanup() {
 
 get_listen_port() {
     o=`agg_cmd raw get_component_state 2>/dev/null`
-    if [ $? -ne 0 ]; then
+    if [ $? -ne 0 -o "$o" = "null" ]; then
         echo
     else
         echo $o | json -a collector | \
