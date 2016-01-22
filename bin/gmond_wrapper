@@ -24,15 +24,18 @@ get_listen_port() {
 
 trap cleanup INT KILL HUP
 
+OLD_COLL=
 while true; do
     export ZMQ_COLLECTOR=`get_listen_port`
-    if [ "$OLD_COLL" != "$ZMQ_COLLECTOR" ]; then
+    if [ "$OLD_COLL" != "$ZMQ_COLLECTOR" -a -n "$ZMQ_COLLECTOR" ]; then
         if [ -n "$PID" ]; then
             kill $PID && echo "gmond killed at "`date` >> $LOG
         fi
         gmond -c $GMOND_CONF >>$LOG 2>&1 &
         PID=$!
+        echo "Started gmond "`date`
         OLD_COLL=$ZMQ_COLLECTOR
     fi
-    sleep 60
+    sleep 30
 done
+cleanup
