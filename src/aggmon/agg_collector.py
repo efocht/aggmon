@@ -194,9 +194,9 @@ class AggPubThread(threading.Thread, AggPubMatch):
         
 
 class SubscriberQueue(threading.Thread):
-    def __init__(self, zmq_context, listen="tcp://0.0.0.0:5555", pre=None):
+    def __init__(self, zmq_context, listen="tcp://0.0.0.0:5555", pre=[]):
         """
-        pre: function that processes the message before putting it into the queue
+        pre: chain of functions that processes the message before putting it into the queue
         """
         self.queue = Queue()
         self.pre = pre
@@ -226,8 +226,8 @@ class SubscriberQueue(threading.Thread):
                 msg = json.loads(s)
                 #log.debug("received: %r" % msg)
 
-                if self.pre is not None:
-                    msg = self.pre(msg)
+                for pre in self.pre:
+                    msg = pre(msg)
 
                 self.queue.put(msg)
                 if count == 0:
@@ -341,13 +341,29 @@ def aggmon_collector(argv):
         #    log.info("cpu_user val: %r" % msg)
         return msg
 
+    def convert_str_int_float(msg):
+        # convert string values to int or float
+        if "V" in msg:
+            val = msg["V"]
+            if isinstance(val, basestring):
+                if val.isdigit():
+                    val = int(val)
+                    msg["V"] = val
+                else:
+                    try:
+                        val = float(val)
+                        msg["V"] = val
+                    except ValueError:
+                        pass
+        return msg
+
     context = zmq.Context()
-    subq = SubscriberQueue(context, pargs.listen, pre=spoofed_host)
+    subq = SubscriberQueue(context, pargs.listen, pre=[spoofed_host, convert_str_int_float])
 
     tagger = MsgTagger(tags=tags)
     pubsub = AggPubThread(context, subq.queue, subs=subs, tagger=tagger.do_tag)
 
-
+    
     def save_subs_tags(msg):
         save_state(pargs.state_file, [pubsub.subs, tagger.tags])
 
