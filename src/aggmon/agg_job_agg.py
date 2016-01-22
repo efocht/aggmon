@@ -82,7 +82,18 @@ class JobAggregator(threading.Thread):
 
     def do_aggregate_and_send(self, cmd):
         log.debug("do_aggregate_and_send: cmd = %r" % cmd)
-        for metric in cmd["metrics"]:
+        metrics = cmd["metrics"]
+        if isinstance(metrics, basestring):
+            if metrics.startswith("RE:"):
+                metrics_match = metrics.lstrip("RE:")
+                metrics = []
+                for metric in self.metric_caches.keys():
+                    m = re.match(metrics_match, metric)
+                    if m:
+                        metrics.append(metric)
+            else:
+                metrics = [metrics]
+        for metric in metrics:
             log.debug("do_aggregate_and_send: metric = %s" % metric)
             # TODO: add regexp case
             agg_type = cmd["agg_type"]
@@ -105,7 +116,13 @@ class JobAggregator(threading.Thread):
             log.debug("calling aggregate: agg_type=%s, values=%r" % (agg_type, values))
             agg_value = aggs.aggregate(agg_type, values)
             log.debug("aggregate returned: %r" % agg_value)
-            metric = {"N": agg_metric, "J": self.jobid, "T": now, "V": agg_value}
+            #
+            # TODO: what should the "H" (host) be for an aggregated metric?
+            # We set it empty, but this bears the risk to lose data because multiple jobs
+            # can lead to the same (H, N, T) index in the database. The risk is limited if
+            # T is a float.
+            #
+            metric = {"H": "", "N": agg_metric, "J": self.jobid, "T": now, "V": agg_value}
             log.debug("agg metric = %r, pushing it to %s" % (metric, push_target))
             rc = self.zmq_push.send(push_target, metric)
 
