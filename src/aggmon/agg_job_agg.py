@@ -102,7 +102,7 @@ class JobAggregator(threading.Thread):
             ttl = None
             if "ttl" in cmd:
                 ttl = cmd["ttl"]
-            now = int(time.time())
+            now = time.time()
 
             values = []
             if metric not in self.metric_caches:
