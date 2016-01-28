@@ -355,7 +355,7 @@ def relay_to_collectors(context, cmd, msg):
 
     result = {}
     for cmd_port in get_collectors_cmd_ports():
-        log.info("relaying msg to '%s'" % cmd_port)
+        log.info("relaying '%s' msg to '%s'" % (cmd, cmd_port))
         result[cmd_port] = send_rpc(context, cmd_port, cmd, **msg)
 
     return result
