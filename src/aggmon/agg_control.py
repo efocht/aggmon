@@ -291,10 +291,10 @@ def msg_tag_num_hosts(msg):
     "Determine the number of hosts a tag message is supposed to match."
     if "H" not in msg:
         return 0
-    if not isinstance(msg["H"], dict) or "s" not in msg["H"]:
-        log.error("Unexpected tag message: %r" % msg)
-        return 0
-    matchexp = msg["H"]["s"]
+    #if not isinstance(msg["H"], dict) or "s" not in msg["H"]:
+    #    log.error("Unexpected tag message: %r" % msg)
+    #    return 0
+    matchexp = msg["H"]
     if matchexp.startswith("RE:"):
         return len(matchexp.lstrip("RE:").split("|"))
     return 1
