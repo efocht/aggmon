@@ -340,7 +340,7 @@ def relay_to_collectors(context, cmd, msg):
     if cmd == "add_tag" and msg["TAG_KEY"] == "J":
         jobid = msg["TAG_VALUE"]
         nhosts = msg_tag_num_hosts(msg)
-        if nhosts >= config["services"]["job_agg"]["min_hosts"]:
+        if nhosts >= config["services"]["job_agg"]["min_nodes"]:
             create_job_agg_instance(jobid)
     elif cmd == "remove_tag" and msg["TAG_KEY"] == "J":
         jobid = msg["TAG_VALUE"]
