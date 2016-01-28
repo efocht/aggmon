@@ -12,7 +12,7 @@ import zmq
 from agg_component import ComponentStatesRepo, group_name
 from agg_rpc import send_rpc, zmq_own_addr_for_uri, RPCThread
 from scheduler import Scheduler
-from repeat_timer import RepeatTimer
+from repeat_event import RepeatEvent
 # Path Fix
 sys.path.append(
     os.path.abspath(
