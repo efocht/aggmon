@@ -344,7 +344,7 @@ def relay_to_collectors(context, cmd, msg):
             create_job_agg_instance(jobid)
     elif cmd == "remove_tag" and msg["TAG_KEY"] == "J":
         jobid = msg["TAG_VALUE"]
-        remove_job_agg_instance(jobid, msg)
+        remove_job_agg_instance(jobid)
     elif cmd == "reset_tags":
         pass
         #remove_all_job_agg_instances()
