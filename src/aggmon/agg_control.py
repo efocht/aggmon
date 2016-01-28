@@ -11,6 +11,7 @@ import time
 import zmq
 from agg_component import ComponentStatesRepo, group_name
 from agg_rpc import send_rpc, zmq_own_addr_for_uri, RPCThread
+from scheduler import Scheduler
 from repeat_timer import RepeatTimer
 # Path Fix
 sys.path.append(
@@ -59,6 +60,9 @@ jagg_timers = {}
 
 # own (dispatcher) rpc port
 me_rpc = ""
+
+# periodic events scheduler
+scheduler = None
 
 # ZeroMQ context (global)
 zmq_context = None
@@ -272,13 +276,13 @@ def make_timers(jobid):
     Create one timer for each aggregator config. An aggregator config can
     trigger the aggregation of multiple metrics.
     """
-    global aggregate, jagg_timers, zmq_context
+    global aggregate, jagg_timers, scheduler, zmq_context
 
     timers = []
     for cfg in aggregate:
         if cfg["agg_class"] == "job":
             interval = cfg["interval"]
-            t = RepeatTimer(interval, do_aggregate, *[jobid, zmq_context], **cfg)
+            t = RepeatEvent(scheduler, interval, do_aggregate, *[jobid, zmq_context], **cfg)
             timers.append(t)
     jagg_timers[jobid] = timers
 
@@ -474,7 +478,7 @@ def start_fixups(program_restart=False, program_start=False):
 
 def aggmon_control(argv):
 
-    global component_states, zmq_context, me_rpc, job_list
+    global component_states, scheduler, zmq_context, me_rpc, job_list
     
     ap = argparse.ArgumentParser()
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5558", action="store", help="RPC command port")
@@ -500,6 +504,8 @@ def aggmon_control(argv):
 
     rpc = RPCThread(zmq_context, listen=pargs.cmd_port)
     rpc.start()
+
+    scheduler = Scheduler()
 
     me_rpc = "tcp://%s:%d" % (me_addr, rpc.port)
     component_states = ComponentStatesRepo(config, me_rpc, zmq_context)
