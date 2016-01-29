@@ -3,7 +3,10 @@ import os
 import sys
 
 if os.path.isdir("../src/aggmon"):
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+    sys.path.append(os.path.abspath(
+        os.path.join(
+            os.path.dirname(
+                os.path.realpath(__file__)), "..", "src")))
 
 if __name__ == "__main__":
     from aggmon.agg_job_agg import aggmon_jobagg
