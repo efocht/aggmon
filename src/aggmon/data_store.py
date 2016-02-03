@@ -27,6 +27,7 @@ from metric_store.mongodb_store import *
 
 
 log = logging.getLogger( __name__ )
+component = None
 
 
 class DataStore(threading.Thread):
@@ -133,6 +134,8 @@ class DataStore(threading.Thread):
 
 
 def aggmon_data_store(argv):
+    global component
+
     ap = argparse.ArgumentParser()
     ap.add_argument('-g', '--group', default="universe", action="store", help="group/cluster served by this daemon instance")
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5511", action="store", help="RPC command port")
@@ -154,7 +157,6 @@ def aggmon_data_store(argv):
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
-    component = None
 
     # open mongo/toku DB
     mongo_host, mongo_port = pargs.host.split(":")
@@ -176,12 +178,12 @@ def aggmon_data_store(argv):
     recv_port = zmq_socket_bind_range(receiver, pargs.listen)
     assert( recv_port is not None)
 
+
     def subscribe_collectors(__msg):
         for msgb in pargs.msgbus:
             log.info( "subscribing to all msgs at '%s'" % msgb )
             me_addr = zmq_own_addr_for_uri(msgb)
             send_rpc(context, msgb, "subscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port))
-
 
     def unsubscribe_and_quit(__msg):
         for msgb in pargs.msgbus:
@@ -196,16 +198,16 @@ def aggmon_data_store(argv):
     rpc.register_rpc("quit", unsubscribe_and_quit)
     rpc.register_rpc("resubscribe", subscribe_collectors)
 
-    # subscribe to message bus
-    subscribe_collectors(None)
-
     if len(pargs.dispatcher) > 0:
         me_addr = zmq_own_addr_for_uri(pargs.dispatcher)
         me_listen = "tcp://%s:%d" % (me_addr, recv_port)
         me_rpc = "tcp://%s:%d" % (me_addr, rpc.port)
         state = get_kwds(component="data_store", cmd_port=me_rpc, listen=me_listen, group=pargs.group)
         component = ComponentState(context, pargs.dispatcher, state=state)
+        rpc.register_rpc("resend_state", component.reset_timer)
 
+    # subscribe to message bus
+    subscribe_collectors(None)
 
     tstart = None
     log.info( "Started msg receiver on %s" % pargs.listen )

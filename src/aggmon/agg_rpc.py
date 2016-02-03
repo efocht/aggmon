@@ -10,7 +10,7 @@ except:
 import zmq
 
 
-RPC_TIMEOUT = os.environ.get("AGG_RPC_TIMEOUT", 5000) # 5 seconds by default
+RPC_TIMEOUT = int(os.environ.get("AGG_RPC_TIMEOUT", 5000)) # 5 seconds by default
 log = logging.getLogger( __name__ )
 
 
