@@ -257,7 +257,7 @@ def do_aggregate(jobid, zmq_context, **cfg):
       "metrics": ["load_one"] }
     """
     #cfg = copy.copy(agg_cfg)
-    log.debug("do_aggregate jobid=%s cfg=%r" % (jobid, cfg))
+    log.info("do_aggregate jobid=%s cfg=%r" % (jobid, cfg))
     push_target_uri = cfg["push_target"]
     if push_target_uri.startswith("@"):
         push_target_uri = get_push_target(push_target_uri)
@@ -504,18 +504,20 @@ def aggmon_control(argv):
     me_addr = zmq_own_addr_for_uri("tcp://8.8.8.8:10000")
 
     rpc = RPCThread(zmq_context, listen=pargs.cmd_port)
-    rpc.start()
 
     scheduler = Scheduler()
+    scheduler.start()
 
     me_rpc = "tcp://%s:%d" % (me_addr, rpc.port)
     component_states = ComponentStatesRepo(config, me_rpc, zmq_context)
+    log.info("created component_states_repo")
 
     rpc.register_rpc("set_component_state", component_states.set_state,
                      post=make_timers_and_save, post_args=[component_states, pargs.state_file])
     rpc.register_rpc("del_component_state", component_states.del_state,
                      post=component_states.save_state, post_args=[pargs.state_file])
     rpc.register_rpc("get_component_state", component_states.get_state)
+    log.info("registered rpcs")
 
     if not pargs.kill:
         # connect to the top level database. the one which stores the job lists
@@ -525,17 +527,21 @@ def aggmon_control(argv):
 
     # TODO: add smart starter of components: check/load saved state, query a resend,
     #       kill and restart if no update?
-    res = component_states.load_state(pargs.state_file)
+    res = component_states.load_state(pargs.state_file, mode = (pargs.kill and pargs.quick) and "kill" or "keep")
+    log.info("component_states_load returned %r" % res)
 
     if pargs.kill:
         if res is not None or pargs.wait:
             if not pargs.quick:
                 log.info("... waiting 70 seconds for state messages to come in ...")
+                rpc.start()
                 time.sleep(70)
                 log.info("killing components that were found running...")
             component_states.kill_components(["collector", "data_store", "job_agg"])
             time.sleep(10)
         sys.exit(0)
+
+    rpc.start()
 
     #
     # start missing components

@@ -216,6 +216,7 @@ class SubscriberQueue(threading.Thread):
         self.msg_receiver()
 
     def msg_receiver(self):
+        global component
         # Start our clock now
         tstart = None
         
@@ -234,6 +235,7 @@ class SubscriberQueue(threading.Thread):
                 if count == 0:
                     tstart = time.time()
                 count += 1
+                component.update({"stats.msgs_recvd": count})
                 if count % 10000 == 0 or "PRINT" in msg:
                 #if count % 10 == 0 or "PRINT" in msg:
                     tend = time.time()
@@ -304,6 +306,8 @@ def test_pub():
 
 
 def aggmon_collector(argv):
+    global component
+
     ap = argparse.ArgumentParser()
     ap.add_argument('-C', '--cmd-port', default="tcp://127.0.0.1:5556", action="store", help="RPC command port")
     ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
@@ -368,6 +372,10 @@ def aggmon_collector(argv):
     def save_subs_tags(msg):
         save_state(pargs.state_file, [pubsub.subs, tagger.tags])
 
+    def quit(msg):
+        subq.stopping = True
+        # raw exit for now
+        os._exit(0)
 
     rpc = RPCThread(context, listen=pargs.cmd_port)
     rpc.start()
@@ -380,11 +388,6 @@ def aggmon_collector(argv):
     rpc.register_rpc("remove_tag", tagger.remove_tag, post=save_subs_tags)
     rpc.register_rpc("reset_tags", tagger.reset_tags, post=save_subs_tags)
     rpc.register_rpc("show_tags", tagger.show_tags)
-
-    def quit(msg):
-        subq.stopping = True
-        # raw exit for now
-        os._exit(0)
     rpc.register_rpc("quit", quit)
 
     pubsub.start()

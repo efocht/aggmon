@@ -11,13 +11,14 @@ import time
 import ujson
 import zmq
 from Queue import Queue, Empty
-from agg_component import get_kwds, ComponentState, this_component
+from agg_component import get_kwds, ComponentState
 from agg_mcache import MCache
 from agg_rpc import *
 import basic_aggregators as aggs
 
 
 log = logging.getLogger( __name__ )
+component = None
 
 
 """
@@ -179,6 +180,8 @@ class JobAggregator(threading.Thread):
             self.queue.task_done()
 
 def aggmon_jobagg(argv):
+    global component
+
     ap = argparse.ArgumentParser()
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5501", action="store", help="RPC command port")
     ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
@@ -194,6 +197,7 @@ def aggmon_jobagg(argv):
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
+    component = None
 
     if len(pargs.jobid) == 0:
         log.error("jobid argument can not be empty!")
@@ -215,11 +219,11 @@ def aggmon_jobagg(argv):
 
 
     def aggregate_rpc(msg):
-        agg_rpcs = this_component.state.get("stats.agg_rpcs", 0)
+        agg_rpcs = component.state.get("stats.agg_rpcs", 0)
         agg_rpcs += 1
         num_sent = jagg.do_aggregate_and_send(msg)
-        aggs_sent = this_component.state.get("stats.aggs_sent", 0) + num_sent
-        this_component.update({"stats.agg_rpcs": agg_rpcs, "stats.aggs_sent": aggs_sent})
+        aggs_sent = component.state.get("stats.aggs_sent", 0) + num_sent
+        component.update({"stats.agg_rpcs": agg_rpcs, "stats.aggs_sent": aggs_sent})
 
     def subscribe_collectors(__msg):
         for msgb in pargs.msgbus:
@@ -227,7 +231,6 @@ def aggmon_jobagg(argv):
             me_addr = zmq_own_addr_for_uri(msgb)
             send_rpc(context, msgb, "subscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port),
                      J=pargs.jobid)
-
 
     def unsubscribe_and_quit(__msg):
         # subscribe to message bus
@@ -246,14 +249,13 @@ def aggmon_jobagg(argv):
     # subscribe to message bus
     subscribe_collectors(None)
 
-    component = None
     if len(pargs.dispatcher) > 0:
         me_addr = zmq_own_addr_for_uri(pargs.dispatcher)
         me_listen = "tcp://%s:%d" % (me_addr, recv_port)
         me_rpc = "tcp://%s:%d" % (me_addr, rpc.port)
         state = get_kwds(component="job_agg", cmd_port=me_rpc, listen=me_listen, jobid=pargs.jobid)
         component = ComponentState(context, pargs.dispatcher, state=state)
-                 
+        rpc.register_rpc("resend_state", component.reset_timer)
 
     tstart = None
     log.info( "Started msg receiver on %s" % pargs.listen )
@@ -283,7 +285,7 @@ def aggmon_jobagg(argv):
                 tstart = time.time()
                 count = 0
             count += 1
-            this_component.update({"stats.val_msgs_recvd": count})
+            component.update({"stats.val_msgs_recvd": count})
             if (pargs.stats and count % 10000 == 0) or \
                (cmd is not None and cmd["cmd"] == "show-stats"):
                 tend = time.time()

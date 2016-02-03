@@ -1,3 +1,9 @@
+import logging
+
+
+log = logging.getLogger( __name__ )
+
+
 class RepeatEvent(object):
     def __init__(self, scheduler, _interval, _function, *args, **kwargs):
         self.scheduler  = scheduler
@@ -11,13 +17,15 @@ class RepeatEvent(object):
 
     def _run(self):
         self.is_running = False
-        self._function(*self.args, **self.kwargs)
+        log.debug("_run %r(%r, %r)" % (self.function, self.args, self.kwargs))
+        res = self.function(*self.args, **self.kwargs)
+        log.debug("res = %r" % res)
         self.start()
 
     def start(self):
         if not self.is_running:
-            self._event = self.scheduler.enter(self.interval, 1, self._run, ())
+            self.event = self.scheduler.enter(self.interval, 1, self._run, ())
             self.is_running = True
 
     def stop(self):
-        self.scheduler.cancel(self._event)
+        self.scheduler.cancel(self.event)

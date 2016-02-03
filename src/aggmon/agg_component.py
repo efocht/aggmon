@@ -311,6 +311,7 @@ class ComponentStatesRepo(object):
         res = False
         if "cmd_port" in state:
             # send "quit" cmd over RPC
+            log.info("requesting resend_state from %s" % state["cmd_port"])
             reply = send_rpc(self.zmq_context, state["cmd_port"], "resend_state")
             if reply is not None:
                 res = True
@@ -327,10 +328,11 @@ class ComponentStatesRepo(object):
         state_file: the file name where the state is saved
         mode: load mode: can be:
               "keep": keep running components
+              "kill": expecting to kill running components, no resend requested
               "restart": restart running components
               ...?
         """
-        log.debug("load_state from %s" % state_file)
+        log.info("load_state from %s" % state_file)
         try:
             fp = open(state_file)
             loaded = json.load(fp)
@@ -339,6 +341,7 @@ class ComponentStatesRepo(object):
             log.error("Exception in state load '%s': %r" % (state_file, e))
             return None
 
+        log.debug("loaded: %r" % loaded)
         if len(loaded) == 0 or len(loaded[0]) == 0:
             return None
         loaded_state = loaded[0]
@@ -347,16 +350,19 @@ class ComponentStatesRepo(object):
         #
         # only mode == "keep" is implemented
         #
-        # request resend of state from all components
-        for component, compval in loaded_state.items():
-            self.repo[component] = compval
-            for ckey, cstate in compval.items():
-                # set the "outdated!" attribute
-                # it will disappear if the component sends a component update message
-                # thus it is used for marking non-working components
-                self.repo[component][ckey]["outdated!"] = True
-                self.request_resend(cstate)
-                time.sleep(0.05)
+        if mode == "keep":
+            # request resend of state from all components
+            for component, compval in loaded_state.items():
+                self.repo[component] = compval
+                for ckey, cstate in compval.items():
+                    # set the "outdated!" attribute
+                    # it will disappear if the component sends a component update message
+                    # thus it is used for marking non-working components
+                    self.repo[component][ckey]["outdated!"] = True
+                    self.request_resend(cstate)
+                    time.sleep(0.05)
+        elif mode == "kill":
+            pass
         return True
 
     def save_state(self, __msg, state_file):
