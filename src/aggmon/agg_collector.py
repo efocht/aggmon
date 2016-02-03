@@ -30,6 +30,7 @@ from agg_rpc import *
 
 
 log = logging.getLogger( __name__ )
+component = None
 
 
 class AggPubMatch(object):

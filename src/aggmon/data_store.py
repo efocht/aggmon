@@ -154,6 +154,7 @@ def aggmon_data_store(argv):
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
+    component = None
 
     # open mongo/toku DB
     mongo_host, mongo_port = pargs.host.split(":")
@@ -235,7 +236,9 @@ def aggmon_data_store(argv):
             store.queue.put(msg)
             if count == 0 or (cmd is not None and cmd["cmd"] == "reset-stats"):
                 tstart = time.time()
+                count = 0
             count += 1
+            component.update({"stats.msgs_recvd": count})
             if (pargs.stats and count % 10000 == 0) or \
                (cmd is not None and cmd["cmd"] == "show-stats"):
                 tend = time.time()
