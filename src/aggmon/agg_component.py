@@ -342,6 +342,8 @@ class ComponentStatesRepo(object):
         if len(loaded) == 0 or len(loaded[0]) == 0:
             return None
         loaded_state = loaded[0]
+        if len(loaded_state) == 0:
+            return None
         #
         # only mode == "keep" is implemented
         #
