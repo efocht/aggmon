@@ -83,6 +83,7 @@ class JobAggregator(threading.Thread):
     def do_aggregate_and_send(self, cmd):
         log.debug("do_aggregate_and_send: cmd = %r" % cmd)
         metrics = cmd["metrics"]
+        num_sent = 0
         if isinstance(metrics, basestring):
             if metrics.startswith("RE:"):
                 metrics_match = metrics.lstrip("RE:")
@@ -125,6 +126,9 @@ class JobAggregator(threading.Thread):
             metric = {"H": "", "N": agg_metric, "J": self.jobid, "T": now, "V": agg_value}
             log.debug("agg metric = %r, pushing it to %s" % (metric, push_target))
             rc = self.zmq_push.send(push_target, metric)
+            if rc:
+                num_sent += 1
+        return num_sent
 
     def run(self):
         log.info( "[Started JobAggregator Thread]" )
@@ -190,6 +194,7 @@ def aggmon_jobagg(argv):
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
+    component = None
 
     if len(pargs.jobid) == 0:
         log.error("jobid argument can not be empty!")
@@ -211,7 +216,11 @@ def aggmon_jobagg(argv):
 
 
     def aggregate_rpc(msg):
-        jagg.do_aggregate_and_send(msg)
+        agg_rpcs = component.state.get("stats.agg_rpcs", 0)
+        agg_rpcs += 1
+        num_sent = jagg.do_aggregate_and_send(msg)
+        aggs_sent = component.state.get("stats.aggs_sent", 0) + num_sent
+        component.update({"stats.agg_rpcs": agg_rpcs, "stats.aggs_sent": aggs_sent})
 
     def subscribe_collectors(__msg):
         for msgb in pargs.msgbus:
@@ -238,7 +247,6 @@ def aggmon_jobagg(argv):
     # subscribe to message bus
     subscribe_collectors(None)
 
-    component = None
     if len(pargs.dispatcher) > 0:
         me_addr = zmq_own_addr_for_uri(pargs.dispatcher)
         me_listen = "tcp://%s:%d" % (me_addr, recv_port)
@@ -275,6 +283,7 @@ def aggmon_jobagg(argv):
                 tstart = time.time()
                 count = 0
             count += 1
+            component.update({"stats.val_msgs_recvd": count})
             if (pargs.stats and count % 10000 == 0) or \
                (cmd is not None and cmd["cmd"] == "show-stats"):
                 tend = time.time()
