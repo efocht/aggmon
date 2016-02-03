@@ -1,0 +1,34 @@
+The data stored by aggmon in TokuMX/MongoDB is organized as follows:
+
+
+Database name: metricdb
+=======================
+
+Collection: metric_md
+---------------------
+
+This collection contains metric metadata records. They are mainly inspired by ganglia metadata records.
+
+{ "_id" : ObjectId("5626343b766ff1322d0d7c36"),
+  "CLUSTER" : "/universe", "DMAX" : 0, "GROUP" : "sensor.status", "HOST" : "e0150",
+  "NAME" : "ipmi.status.temp.cpu.2", "SLOPE" : 0, "TMAX" : 300, "TYPE" : "string",
+  "UNITS" : "", "_type" : "MMetric", "hpath" : "/universe/e0150/ipmi.status.temp.cpu.2" }
+
+Document keys:
+CLUSTER
+HOST
+NAME
+GROUP
+TYPE
+SLOPE
+TMAX
+DMAX
+UNITS
+hpath
+
+
+Collection: metric_<group_name>
+-------------------------------
+
+This collection contains the metric value records.
+
