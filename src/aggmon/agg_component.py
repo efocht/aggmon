@@ -9,7 +9,6 @@ from agg_job_command import send_agg_command
 from repeat_timer import RepeatTimer
 
 
-this_component = None
 log = logging.getLogger( __name__ )
 DEFAULT_PING_INTERVAL = 60
 
@@ -66,6 +65,8 @@ class ComponentState(object):
     Component side state. A timer is instantiated and sends component state information periodically.
     The state itself is in the dict "state".
     """
+    this = None
+    
     def __init__(self, zmq_context, dispatcher, ping_interval=DEFAULT_PING_INTERVAL, state={}):
         global this_component
         self.zmq_context = zmq_context
@@ -79,7 +80,7 @@ class ComponentState(object):
         self.state["ping_interval"] = self.ping_interval
         self.timer = None
         self.reset_timer()
-        this_component = self
+        ComponentState.this = self
 
     def reset_timer(self, *__args, **__kwds):
         if self.timer is not None:
