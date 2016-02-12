@@ -257,7 +257,7 @@ def do_aggregate(jobid, zmq_context, **cfg):
       "metrics": ["load_one"] }
     """
     #cfg = copy.copy(agg_cfg)
-    log.info("do_aggregate jobid=%s cfg=%r" % (jobid, cfg))
+    log.debug("do_aggregate jobid=%s cfg=%r" % (jobid, cfg))
     push_target_uri = cfg["push_target"]
     if push_target_uri.startswith("@"):
         push_target_uri = get_push_target(push_target_uri)
