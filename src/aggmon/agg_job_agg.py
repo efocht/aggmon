@@ -225,6 +225,9 @@ def aggmon_jobagg(argv):
         aggs_sent = component.state.get("stats.aggs_sent", 0) + num_sent
         component.update({"stats.agg_rpcs": agg_rpcs, "stats.aggs_sent": aggs_sent})
 
+    def show_mcache(msg):
+        return jagg.metric_caches
+
     def subscribe_collectors(__msg):
         for msgb in pargs.msgbus:
             log.info( "subscribing to msgs of job %s at %s" % (pargs.jobid, msgb) )
@@ -245,6 +248,7 @@ def aggmon_jobagg(argv):
     rpc.register_rpc("agg", aggregate_rpc)
     rpc.register_rpc("quit", unsubscribe_and_quit)
     rpc.register_rpc("resubscribe", subscribe_collectors)
+    rpc.register_rpc("show_mcache", show_mcache)
 
     # subscribe to message bus
     subscribe_collectors(None)
