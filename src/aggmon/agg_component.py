@@ -189,24 +189,26 @@ class ComponentStatesRepo(object):
             try:
                 exec_cmd = self.config["global"]["remote_kill"] % state
                 out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
-                #res = del_state(msg)
-                send_rpc(self.zmq_context, self.dispatcher, "del_component_state", **msg)
+                #send_rpc(self.zmq_context, self.dispatcher, "del_component_state", **msg)
             except Exception as e:
                 log.error("subprocess error when running '%s' : '%r'" % (exec_cmd, e))
                 res = False
+            res = self.del_state(msg)
         return res
 
 
     def kill_components(self, component_types):
-        for group_path in self.config["groups"]:
+        for group_path in self.config["groups"].keys():
             for comp_type in component_types:
                 c = self.get_state({"component": comp_type, "group": group_path})
                 if c is not None:
                     if "component" in c:
+                        log.info("killing component %r" % c)
                         self.kill_component(comp_type, group_path, METHOD="kill")
                     else:
                         log.debug("components: %r" % c)
                         for jobid, jagg in c.items():
+                            log.info("killing job_agg component %s" % jobid)
                             self.kill_component(comp_type, group_path, jobid=jobid, METHOD="kill")
 
 
@@ -272,7 +274,7 @@ class ComponentStatesRepo(object):
     def del_state(self, msg):
         """
         """
-        log.info("del_state: msg %r" % msg)
+        log.debug("del_state: msg %r" % msg)
         if "component" not in msg:
             return False
         component = msg["component"]
@@ -349,21 +351,19 @@ class ComponentStatesRepo(object):
         if len(loaded_state) == 0:
             return None
         #
-        # only mode == "keep" is implemented
-        #
-        if mode == "keep":
-            # request resend of state from all components
-            for component, compval in loaded_state.items():
-                self.repo[component] = compval
-                for ckey, cstate in compval.items():
-                    # set the "outdated!" attribute
-                    # it will disappear if the component sends a component update message
-                    # thus it is used for marking non-working components
-                    self.repo[component][ckey]["outdated!"] = True
+        # request resend of state from all components
+        for component, compval in loaded_state.items():
+            self.repo[component] = compval
+            for ckey, cstate in compval.items():
+                # set the "outdated!" attribute
+                # it will disappear if the component sends a component update message
+                # thus it is used for marking non-working components
+                self.repo[component][ckey]["outdated!"] = True
+                if mode == "keep":
                     self.request_resend(cstate)
                     time.sleep(0.05)
-        elif mode == "kill":
-            pass
+                elif mode == "kill":
+                    pass
         return True
 
     def save_state(self, __msg, state_file):
