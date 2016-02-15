@@ -243,6 +243,9 @@ def get_push_target(name):
         top_store_state = component_states.get_state({"component": "data_store", "group": top_group})
         if top_store_state is not None and "listen" in top_store_state:
             return top_store_state["listen"]
+        else:
+            log.warning("get_push_target: top_group=%r" % top_group)
+            log.warning("get_push_target: top_store_state=%r" % top_store_state)
 
 
 def do_aggregate(jobid, zmq_context, **cfg):
@@ -536,11 +539,15 @@ def aggmon_control(argv):
                 log.info("... waiting 70 seconds for state messages to come in ...")
                 rpc.start()
                 time.sleep(70)
-                log.info("killing components that were found running...")
+            log.info("killing components that were found running...")
             component_states.kill_components(["collector", "data_store", "job_agg"])
             time.sleep(10)
+            component_states.save_state(None, pargs.state_file)
+        os._exit(0)
+        # not sure why the sys.exit(0) does not work here
         sys.exit(0)
 
+    log.info("starting rpc...")
     rpc.start()
 
     #
