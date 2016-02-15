@@ -113,11 +113,11 @@ class MongoDBMetricStore(MongoDBStore):
             self._col_val.ensure_index( [("H", ASCENDING),
                                          ("N", ASCENDING),
                                          ("T", ASCENDING)],
-                                        unique=True )
-            self._col_val.ensure_index( [("T", ASCENDING)],
-                                        unique=False, background=True,
-                                        expireAfterSeconds=self._val_ttl )
-            self._col_val.ensure_index( [("J", ASCENDING)], unique=False, background=True )
+                                        unique=False )
+            #self._col_val.ensure_index( [("T", ASCENDING)],
+            #                            unique=False, background=True,
+            #                            expireAfterSeconds=self._val_ttl )
+            self._col_val.ensure_index( [("J", ASCENDING)], unique=False )
         except Exception, e:
             raise Exception( "Failed to ensure index: %s" % str( e ) )
 
