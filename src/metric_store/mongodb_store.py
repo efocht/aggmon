@@ -88,6 +88,13 @@ class MongoDBJobList(MongoDBStore):
 class MongoDBMetricStore(MongoDBStore):
     """
     Numerical (Ganglia style) metrics
+
+    In TokuMX we use partitioned collections.
+    For now, pre-create the value collection before starting the aggmon daemon
+    eg. by:
+
+    db.createCollection('metric_universe', {primaryKey: {T:1, _id:1}, partitioned: true})
+
     """
     def __init__(self, group="/universe", md_col="metric_md", val_col="metric",
                  val_ttl=3600*24*180, **kwds):

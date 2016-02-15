@@ -105,6 +105,8 @@ class DataStore(threading.Thread):
                             _type = "int32"
                         elif isinstance(v, float):
                             _type = "float"
+                        elif isinstance(v, list):
+                            _type = "array"
                         md = {"HOST": val["H"], "NAME": val["N"], "TYPE": _type, "CLUSTER": self.group}
                         res = self.store.insert_md(md)
                         log.debug("insert_metadata returned: %r" % res)
