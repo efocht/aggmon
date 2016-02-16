@@ -22,6 +22,18 @@ get_listen_port() {
     fi
 }
 
+gmond_is_running() {
+    local pid="$1"
+    if [ -z "$pid" -o ! -d /proc/"$pid" ]; then
+        return 1
+    fi
+    comm=`cat "/proc/"$pid"/comm`
+    if [ "$comm" != "gmond" ]; then
+        return 1
+    fi
+    return 0
+}
+
 trap cleanup INT KILL HUP
 
 OLD_COLL=
@@ -31,6 +43,8 @@ while true; do
         if [ -n "$PID" ]; then
             kill $PID && echo "gmond killed at "`date` >> $LOG
         fi
+    fi
+    if ! gmond_is_running "$PID"; then
         gmond -c $GMOND_CONF >>$LOG 2>&1 &
         PID=$!
         echo "Started gmond "`date`
