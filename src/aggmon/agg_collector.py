@@ -152,6 +152,7 @@ class AggPubThread(threading.Thread, AggPubMatch):
         AggPubMatch.__init__(self, zmq_context, subs=subs)
 
     def run(self):
+        global component
         log.info("[Started AggPubThread]")
         count = 0
         while not self.stopping:
@@ -184,6 +185,7 @@ class AggPubThread(threading.Thread, AggPubMatch):
                     tstart = time.time()
                     bstart = tstart
                 count += 1
+                component.update({"stats.msgs_published": count})
                 if count % 10000 == 0:
                     tend = time.time()
                     sys.stdout.write("published %d msgs in %f seconds, %f msg/s\n" %
