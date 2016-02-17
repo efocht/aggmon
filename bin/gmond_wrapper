@@ -27,7 +27,7 @@ gmond_is_running() {
     if [ -z "$pid" -o ! -d /proc/"$pid" ]; then
         return 1
     fi
-    comm=`cat "/proc/"$pid"/comm`
+    comm=`cat /proc/"$pid"/comm`
     if [ "$comm" != "gmond" ]; then
         return 1
     fi
