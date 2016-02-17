@@ -193,6 +193,7 @@ class ComponentStatesRepo(object):
             except Exception as e:
                 log.error("subprocess error when running '%s' : '%r'" % (exec_cmd, e))
                 res = False
+        if res:
             res = self.del_state(msg)
         return res
 
@@ -359,11 +360,11 @@ class ComponentStatesRepo(object):
                 # it will disappear if the component sends a component update message
                 # thus it is used for marking non-working components
                 self.repo[component][ckey]["outdated!"] = True
-                if mode == "keep":
-                    self.request_resend(cstate)
-                    time.sleep(0.05)
-                elif mode == "kill":
-                    pass
+                #if mode == "keep":
+                #    self.request_resend(cstate)
+                #    time.sleep(0.001)
+                #elif mode == "kill":
+                #    pass
         return True
 
     def save_state(self, __msg, state_file):
