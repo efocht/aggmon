@@ -69,7 +69,7 @@ scheduler = None
 zmq_context = None
 
 # list of running jobs, as fresh as the mongodb collection
-job_list = []
+job_list = {}
 
 ##
 # default configuration data
@@ -325,13 +325,13 @@ def remove_job_agg_instance(jobid):
         # kill timer if it exists
         for timer in jagg_timers[jobid]:
             timer.stop()
-    jagg = component_states.get_state({"component": "job_agg", "jobid": jobid})
-    if jagg is not None:
-        log.info("remove_job_agg_instance: jobid=%s" % jobid)
-        component_states.kill_component("job_agg", "/universe", jobid=jobid)
-        # TODO: sending quit message should happen in kill_component
-        #send_agg_command(zmq_context, jagg["listen"], "quit")
-        # TODO: notify collectors and unsubscribe disappearing jobid
+    log.info("remove_job_agg_instance: jobid=%s" % jobid)
+    component_states.kill_component("job_agg", "/universe", jobid=jobid)
+    # TODO: sending quit message should happen in kill_component
+    #send_agg_command(zmq_context, jagg["listen"], "quit")
+    #
+    # TODO: notify collectors and unsubscribe disappearing jobid !!!!!!!!!!!!!!!!!!!!
+    #
 
 
 def remove_all_job_agg_instances():
@@ -345,6 +345,7 @@ def relay_to_collectors(context, cmd, msg):
     Relay msg to collector components RPC ports.
     """
     global config
+    jobid = "-"
     if cmd == "add_tag" and msg["TAG_KEY"] == "J":
         jobid = msg["TAG_VALUE"]
         nhosts = msg_tag_num_hosts(msg)
@@ -359,7 +360,7 @@ def relay_to_collectors(context, cmd, msg):
 
     result = {}
     for cmd_port in get_collectors_cmd_ports():
-        log.info("relaying '%s' msg to '%s'" % (cmd, cmd_port))
+        log.info("relaying '%s' %s msg to '%s'" % (cmd, jobid, cmd_port))
         result[cmd_port] = send_rpc(context, cmd_port, cmd, **msg)
 
     return result
@@ -386,8 +387,11 @@ def start_fixups(program_restart=False, program_start=False):
     :return: True if successful, False otherwise
     """
 
-    global config, job_list, zmq_context, component_states
+    global config, job_list, zmq_context, component_states, me_rpc
 
+    #
+    # Handle collectors
+    #
     num_collectors = 0
     num_collectors_started = 0
     for group_path in config["groups"]:
@@ -397,7 +401,7 @@ def start_fixups(program_restart=False, program_start=False):
             if "outdated!" in pub:
                 component_states.del_state({"component": "collector", "group": group_path})
             component_states.start_component("collector", group_path, statefile="/tmp/state.agg_collector_%s" % group,
-                            dispatcher=me_rpc)
+                                             dispatcher=me_rpc)
             num_collectors_started += 1
         num_collectors += 1
 
@@ -412,6 +416,9 @@ def start_fixups(program_restart=False, program_start=False):
             log.info("asking collector '%s' to reset subscriptions" % cmd_port)
             send_rpc(zmq_context, cmd_port, "reset_subs")
 
+    #
+    # Handle data stores
+    #
     msgbus_arr = ["--msgbus %s" % cmd_port for cmd_port in get_collectors_cmd_ports()]
     for group_path in config["groups"]:
         group = group_name(group_path)
@@ -442,18 +449,15 @@ def start_fixups(program_restart=False, program_start=False):
         send_rpc(zmq_context, cmd_port, "reset_tags")
 
     jaggs = component_states.get_state({"component": "job_agg"})
+    job_list_keys = job_list.keys()
     for jobid, jcomp in jaggs.items():
-        if "outdated!" in jcomp or "exited!" in jcomp:
+        if "outdated!" in jcomp or "exited!" in jcomp or jobid not in job_list_keys:
             remove_job_agg_instance(jobid)
             # what if this process has crashed?
 
     if program_start or program_restart:
         log.info("fixup job_aggs: %r" % job_list)
-        for j in job_list:
-            jobid = j["name"]
-            if "cnodes" not in j:
-                log.warning("fixup job_aggs: skipping job without nodes! jobid=%s" % jobid)
-                continue
+        for jobid, j in job_list.items():
             log.info("fixup: jobid %s" % jobid)
             if jobid not in jaggs:
                 # start aggregators for new jobs
@@ -470,14 +474,15 @@ def start_fixups(program_restart=False, program_start=False):
 
             # add tagging for running jobs
             nodes = j["cnodes"]
-            if len(nodes) >= config["services"]["job_agg"]["min_nodes"]:
-                if len(nodes) == 1:
-                    nodesmatch = nodes[0]
-                else:
-                    nodesmatch = "RE:^(%s)$" % "|".join(nodes)
-                for cmd_port in get_collectors_cmd_ports():
-                    log.info("adding tag for job '%s' on collector '%s'" % (jobid, cmd_port))
-                    send_rpc(zmq_context, cmd_port, "add_tag", TAG_KEY="J", TAG_VALUE=jobid, H=nodesmatch)
+            if len(nodes) == 1:
+                nodesmatch = nodes[0]
+            else:
+                nodesmatch = "RE:^(%s)$" % "|".join(nodes)
+            for cmd_port in get_collectors_cmd_ports():
+                log.info("adding tag for job '%s' on collector '%s'" % (jobid, cmd_port))
+                send_rpc(zmq_context, cmd_port, "add_tag", TAG_KEY="J", TAG_VALUE=jobid, H=nodesmatch)
+
+
 
 
 def aggmon_control(argv):
@@ -520,6 +525,17 @@ def aggmon_control(argv):
     rpc.register_rpc("del_component_state", component_states.del_state,
                      post=component_states.save_state, post_args=[pargs.state_file])
     rpc.register_rpc("get_component_state", component_states.get_state)
+
+    rpc.register_rpc("add_tag", lambda x: relay_to_collectors(zmq_context, "add_tag", x),
+                     post=component_states.save_state, post_args=[pargs.state_file])
+    rpc.register_rpc("remove_tag", lambda x: relay_to_collectors(zmq_context, "remove_tag", x),
+                     post=component_states.save_state, post_args=[pargs.state_file])
+    rpc.register_rpc("reset_tags", lambda x: relay_to_collectors(zmq_context, "reset_tags", x),
+                     post=component_states.save_state, post_args=[pargs.state_file])
+    rpc.register_rpc("show_tags", lambda x: relay_to_collectors(zmq_context, "show_tags", x))
+    rpc.register_rpc("reset_subs", lambda x: relay_to_collectors(zmq_context, "reset_subs", x),
+                     post=component_states.save_state, post_args=[pargs.state_file])
+    rpc.register_rpc("show_subs", lambda x: relay_to_collectors(zmq_context, "show_subs", x))
     log.info("registered rpcs")
 
     if not pargs.kill:
@@ -556,20 +572,17 @@ def aggmon_control(argv):
     if res is not None:
         log.info("Restarting: waiting 70 seconds for state messages to come in ...")
         time.sleep(70)
-    job_list = []
+
+    job_list = {}
     for j in store.find():
-        job_list.append(j)
+        jobid = j["name"]
+        if "cnodes" in j:
+            job_list[jobid] = {"cnodes": j["cnodes"]}
+        else:
+            log.warning("loading job_list: skipping job without nodes! jobid=%s" % jobid)
+
     start_fixups(program_restart=((res is not None) and True or False),
                  program_start=((res is None) and True or False))
-
-    rpc.register_rpc("add_tag", lambda x: relay_to_collectors(zmq_context, "add_tag", x),
-                     post=component_states.save_state, post_args=[pargs.state_file])
-    rpc.register_rpc("remove_tag", lambda x: relay_to_collectors(zmq_context, "remove_tag", x),
-                     post=component_states.save_state, post_args=[pargs.state_file])
-    rpc.register_rpc("reset_tags", lambda x: relay_to_collectors(zmq_context, "reset_tags", x),
-                     post=component_states.save_state, post_args=[pargs.state_file])
-    rpc.register_rpc("show_tags", lambda x: relay_to_collectors(zmq_context, "show_tags", x))
-    rpc.register_rpc("show_subs", lambda x: relay_to_collectors(zmq_context, "show_subs", x))
 
 
     #time.sleep(30)
@@ -581,13 +594,14 @@ def aggmon_control(argv):
     #
     while True:
         try:
-            rpc.join(0.1)
-            if not rpc.isAlive():
-                break
+            time.sleep(0.1)
         except Exception as e:
             log.error("main thread exception: %r" % e)
             break
     print "THE END"
+    os._exit(0)
+    #rpc.join()
+    
 
 if __name__ == "__main__":
     aggmon_control(sys.argv)
