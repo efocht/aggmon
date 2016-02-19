@@ -44,11 +44,15 @@ while true; do
             kill $PID && echo "gmond killed at "`date` >> $LOG
         fi
     fi
-    if ! gmond_is_running "$PID"; then
-        gmond -c $GMOND_CONF >>$LOG 2>&1 &
-        PID=$!
-        echo "Started gmond "`date`
-        OLD_COLL=$ZMQ_COLLECTOR
+    if [ -n "$ZMQ_COLLECTOR" ]; then
+        if ! gmond_is_running "$PID"; then
+            gmond -c $GMOND_CONF >>$LOG 2>&1 &
+            PID=$!
+            echo "Started gmond "`date`
+            OLD_COLL=$ZMQ_COLLECTOR
+        fi
+    else
+        echo `date`" - ZMQ collector port not found" | tee -a $LOG
     fi
     sleep 30
 done
