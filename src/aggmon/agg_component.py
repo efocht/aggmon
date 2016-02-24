@@ -311,6 +311,19 @@ class ComponentStatesRepo(object):
                 return True
         return False
 
+    def check_outdated(self):
+        outdated = []
+        now = time.time()
+        for component in self.repo.keys():
+            for key, state in self.repo[component].items():
+                if "outdated!" in state:
+                    outdated.append(state)
+                    continue
+                if now - state["last_update"] > 2 * state["ping_interval"]:
+                    self.repo[component][key]["outdated!"] = 1
+                    outdated.append(state)
+        return outdated
+
     def request_resend(self, state):
         res = False
         if "cmd_port" in state:
