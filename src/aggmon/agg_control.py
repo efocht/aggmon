@@ -483,6 +483,23 @@ def start_fixups(program_restart=False, program_start=False):
                 send_rpc(zmq_context, cmd_port, "add_tag", TAG_KEY="J", TAG_VALUE=jobid, H=nodesmatch)
 
 
+def component_control():
+    global config, job_list, zmq_context, component_states, me_rpc
+
+    # check outdated components
+    outdated = component_states.check_outdated()
+
+    # restart collectors, if needed
+
+    # restart data stores, if needed
+    
+    # get fresh job_list
+
+    # kill finished job_aggs
+    # unsubscribe killed job_aggs
+    # untag finished jobs
+    # start new job_aggs
+    # tag new jobs
 
 
 def aggmon_control(argv):
