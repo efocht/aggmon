@@ -3,6 +3,7 @@ import os
 import pdb
 import socket
 import threading
+import traceback
 try:
     import ujson as json
 except:
@@ -116,11 +117,11 @@ class RPCThread(threading.Thread):
         self.rpcs = {}
 
     # TODO: integrate rpcs
-    def register_rpc(self, cmd, function, args=[], kwargs={}, post=None, post_args=[]):
+    def register_rpc(self, cmd, function, args=[], kwargs={}, post=None, post_args=[], early_reply=None):
         """
         A rpc function will be called with the arguments: cmd, msg, *args, **kwargs
         """
-        self.rpcs[cmd] = (function, args, kwargs, post, post_args)
+        self.rpcs[cmd] = (function, args, kwargs, post, post_args, early_reply)
 
     def run(self):
         log.info( "[Started RPCThread listening on %s]" % self.listen )
@@ -137,7 +138,12 @@ class RPCThread(threading.Thread):
                     cmd = msg["CMD"]
                     del msg["CMD"]
                     if cmd in self.rpcs:
-                        func, args, kwargs, post, post_args = self.rpcs[cmd]
+                        func, args, kwargs, post, post_args, early_reply = self.rpcs[cmd]
+                        if early_reply is not None:
+                            rep_msg = json.dumps({"RESULT": early_reply})
+                            log.debug( "sending RPC reply msg: %r" % rep_msg )
+                            self.responder.send(rep_msg)
+                            
                         res = func(msg, *args, **kwargs)
 
                         # TODO: Error handling. Return ERROR keyword and proper message.
@@ -145,9 +151,10 @@ class RPCThread(threading.Thread):
                         ###
                         ### send REPLY
                         ###
-                        rep_msg = json.dumps({"RESULT": res})
-                        log.debug( "sending RPC reply msg: %r" % rep_msg )
-                        self.responder.send(rep_msg)
+                        if early_reply is None:
+                            rep_msg = json.dumps({"RESULT": res})
+                            log.debug( "sending RPC reply msg: %r" % rep_msg )
+                            self.responder.send(rep_msg)
     
                         # post handling
                         if post is not None:
@@ -159,6 +166,7 @@ class RPCThread(threading.Thread):
                         self.responder.send(rep_msg)
 
             except Exception as e:
+                log.error(traceback.format_exc())
                 log.error( "Exception in RPC server: %r" % e )
                 log.error( "RPC server: cmd=%s msg=%r" % (cmd, msg) )
                 break

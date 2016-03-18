@@ -390,7 +390,7 @@ def aggmon_collector(argv):
     rpc.register_rpc("remove_tag", tagger.remove_tag, post=save_subs_tags)
     rpc.register_rpc("reset_tags", tagger.reset_tags, post=save_subs_tags)
     rpc.register_rpc("show_tags", tagger.show_tags)
-    rpc.register_rpc("quit", quit)
+    rpc.register_rpc("quit", quit, early_reply=True)
 
     pubsub.start()
     subq.start()

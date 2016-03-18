@@ -4,6 +4,7 @@ import os
 import pdb
 import subprocess
 import time
+import traceback
 from agg_rpc import send_rpc, zmq_own_addr_for_tgt
 from agg_job_command import send_agg_command
 from repeat_timer import RepeatTimer
@@ -157,6 +158,7 @@ class ComponentStatesRepo(object):
                 log.info("output: %s" % out)
                 break
             except Exception as e:
+                log.error(traceback.format_exc())
                 log.error("subprocess error '%r'" % e)
                 log.error("subprocess error when running '%s' : '%r'" % (exec_cmd, e))
                 # trying the next node, if any
@@ -180,21 +182,26 @@ class ComponentStatesRepo(object):
                 reply = send_rpc(self.zmq_context, state["cmd_port"], "quit")
                 if reply is not None:
                     res = True
+                log.debug("kill_component (cmd_port) res=%r" % res)
             elif "listen" in state:
                 # send "quit" cmd over PULL port
                 send_agg_command(self.zmq_context, state["listen"], "quit")
                 res = True
+                log.debug("kill_component (listen) res=%r" % res)
         else:
             # kill process using the remembered pid. This could be dangerous as we could kill another process.
             try:
                 exec_cmd = self.config["global"]["remote_kill"] % state
                 out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
                 #send_rpc(self.zmq_context, self.dispatcher, "del_component_state", **msg)
+                res = True
+                log.debug("kill_component (kill) res=%r" % res)
             except Exception as e:
                 log.error("subprocess error when running '%s' : '%r'" % (exec_cmd, e))
                 res = False
         if res:
             res = self.del_state(msg)
+            log.debug("kill_component deleting state %r" % res)
         return res
 
 
@@ -277,9 +284,11 @@ class ComponentStatesRepo(object):
         """
         log.debug("del_state: msg %r" % msg)
         if "component" not in msg:
+            log.error("del_state: 'component' not in msg %r" % msg)
             return False
         component = msg["component"]
         if component not in self.repo:
+            log.error("del_state: component '%s' not in msg %r" % (component, msg))
             return False
         key = component_key(self.config["services"][component]["component_key"], msg)
         if len(key) > 0:
@@ -312,16 +321,17 @@ class ComponentStatesRepo(object):
         return False
 
     def check_outdated(self):
-        outdated = []
+        outdated = {}
         now = time.time()
         for component in self.repo.keys():
+            outdated[component] = []
             for key, state in self.repo[component].items():
                 if "outdated!" in state:
-                    outdated.append(state)
+                    outdated[component].append(state)
                     continue
                 if now - state["last_update"] > 2 * state["ping_interval"]:
                     self.repo[component][key]["outdated!"] = 1
-                    outdated.append(state)
+                    outdated[component].append(state)
         return outdated
 
     def request_resend(self, state):

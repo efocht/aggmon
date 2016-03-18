@@ -246,7 +246,7 @@ def aggmon_jobagg(argv):
     rpc = RPCThread(context, listen=pargs.cmd_port)
     rpc.start()
     rpc.register_rpc("agg", aggregate_rpc)
-    rpc.register_rpc("quit", unsubscribe_and_quit)
+    rpc.register_rpc("quit", unsubscribe_and_quit, early_reply=True)
     rpc.register_rpc("resubscribe", subscribe_collectors)
     rpc.register_rpc("show_mcache", show_mcache)
 
