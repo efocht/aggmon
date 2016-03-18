@@ -197,7 +197,7 @@ def aggmon_data_store(argv):
 
     rpc = RPCThread(context, listen=pargs.cmd_port)
     rpc.start()
-    rpc.register_rpc("quit", unsubscribe_and_quit)
+    rpc.register_rpc("quit", unsubscribe_and_quit, early_reply=True)
     rpc.register_rpc("resubscribe", subscribe_collectors)
 
     if len(pargs.dispatcher) > 0:

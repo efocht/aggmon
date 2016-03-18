@@ -2,6 +2,7 @@
 import os
 import sys
 
+_BIN_PATH_ = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__))))
 if os.path.isdir("../src/aggmon"):
     sys.path.append(os.path.abspath(
         os.path.join(
