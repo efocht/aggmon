@@ -2,11 +2,10 @@
 import os
 import sys
 
+_BIN_PATH_ = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__))))
+_SRC_PATH_ = sys.path.append(_BIN_PATH_, "..", "src")
 if os.path.isdir("../src/aggmon"):
-    sys.path.append(os.path.abspath(
-        os.path.join(
-            os.path.dirname(
-                os.path.realpath(__file__)), "..", "src")))
+    sys.path.append(_SRC_PATH_)
 
 if __name__ == "__main__":
     from aggmon.agg_collector import aggmon_collector

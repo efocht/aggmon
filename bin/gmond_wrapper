@@ -36,6 +36,15 @@ gmond_is_running() {
 
 trap cleanup INT KILL HUP
 
+if ! which agg_cmd >/dev/null 2>&1; then
+    echo "Command 'agg_cmd' has not been found in PATH. Make sure the PATH is set properly."
+    exit 1
+fi
+if ! which gmond >/dev/null 2>&1; then
+    echo "Command 'gmond' has not been found in PATH. Make sure the PATH is set properly."
+    exit 1
+fi
+
 OLD_COLL=
 while true; do
     export ZMQ_COLLECTOR=`get_listen_port`
