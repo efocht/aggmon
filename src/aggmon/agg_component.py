@@ -165,8 +165,6 @@ class ComponentStatesRepo(object):
     
     
     def kill_component(self, service, group_path, __CALLBACK=None, __CALLBACK_ARGS=[], METHOD="msg", **kwds):
-        global pargs
-
         msg = {"component": service, "group": group_path}
         msg.update(kwds)
         res = False
@@ -220,7 +218,7 @@ class ComponentStatesRepo(object):
                             self.kill_component(comp_type, group_path, jobid=jobid, METHOD="kill")
 
 
-    def set_state(self, msg):
+    def set_state(self, msg, _time_update_=True):
         """
         """
         log.debug("set_state: msg %r" % msg)
@@ -235,25 +233,31 @@ class ComponentStatesRepo(object):
         # now make a meaningful minimal unique key
         key = component_key(self.config["services"][component]["component_key"], msg)
         started = None
+        starting = False
         if key in self.repo[component]:
             log.debug("set_state: updating state for %s %s" % (component, key))
             started = self.repo[component][key]["started"]
         else:
+            starting = True
             log.debug("set_state: setting state for %s %s" % (component, key))
-        msg["last_update"] = time.time()
-        if started is not None:
+        if _time_update_:
+            msg["last_update"] = time.time()
+        if started is not None and "started" in msg:
             if started != msg["started"]:
                 msg["restart!"] = True
-        self.repo[component][key] = msg
-        cbkey = component + ":" + key
-        if cbkey in self.component_start_cb:
-            cb = self.component_start_cb[cbkey]["cb"]
-            args = self.component_start_cb[cbkey]["args"]
-            try:
-                cb(*args)
-            except Exception as e:
-                log.error("start_cb error: %r" % e)
-            del self.component_start_cb[cbkey]
+                starting = True
+        if key not in self.repo[component]:
+            self.repo[component][key] = {}
+        self.repo[component][key].update(msg)
+        if starting:
+            cbkey = component + ":" + key
+            if cbkey in self.component_start_cb:
+                cb = self.component_start_cb[cbkey]["cb"]
+                args = self.component_start_cb[cbkey]["args"]
+                try:
+                    cb(*args)
+                except Exception as e:
+                    log.error("start_cb error: %r" % e)
 
 
     def get_state(self, msg):

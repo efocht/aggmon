@@ -357,7 +357,15 @@ def remove_job_agg_instance(jobid):
         return
 
     log.info("remove_job_agg_instance: jobid=%s" % jobid)
-    component_states.kill_component("job_agg", "/universe", jobid=jobid)
+    if "removing" not in jagg:
+        # mark state as "removing"
+        jagg["removing"] = True
+        component_states.set_state(jagg, _time_update_=False)
+        method = "msg"
+    else:
+        # second try, no try hard kill
+        method = "kill"
+    component_states.kill_component("job_agg", "/universe", jobid=jobid, METHOD=method)
     #
     # notify collectors and unsubscribe disappearing jobid !!!!!!!!!!!!!!!!!!!!
     #
@@ -402,112 +410,6 @@ def make_timers_and_save(msg, component_states, state_file):
             log.info("make_timers(%s)" % jobid)
             make_timers(jobid)
     component_states.save_state(msg, state_file)
-
-
-def start_fixups(program_restart=False, program_start=False):
-    """
-    -
-
-    :param program_restart:
-    :param program_start:
-
-    :return: True if successful, False otherwise
-    """
-
-    global config, job_list, zmq_context, component_states, me_rpc
-
-    #
-    # Handle collectors
-    #
-    num_collectors = 0
-    num_collectors_started = 0
-    for group_path in config["groups"]:
-        group = group_name(group_path)
-        pub = component_states.get_state({"component": "collector", "group": group_path})
-        if pub == {} or "outdated!" in pub:
-            if "outdated!" in pub:
-                component_states.del_state({"component": "collector", "group": group_path})
-            component_states.start_component("collector", group_path, statefile="/tmp/state.agg_collector_%s" % group,
-                                             dispatcher=me_rpc)
-            num_collectors_started += 1
-        num_collectors += 1
-
-    if not component_states.component_wait_timeout("collector", num_collectors, timeout=180):
-        return False, "timeout when waiting for collectors startup!"
-
-    if program_restart:
-        #
-        # fixup subscriptions on collectors
-        #
-        for cmd_port in get_collectors_cmd_ports():
-            log.info("asking collector '%s' to reset subscriptions" % cmd_port)
-            send_rpc(zmq_context, cmd_port, "reset_subs")
-
-    #
-    # Handle data stores
-    #
-    msgbus_arr = ["--msgbus %s" % cmd_port for cmd_port in get_collectors_cmd_ports()]
-    for group_path in config["groups"]:
-        group = group_name(group_path)
-        mong = component_states.get_state({"component": "data_store", "group": group_path})
-        if mong == {} or "outdated!" in mong:
-            if "outdated!" in pub:
-                component_states.del_state({"component": "data_store", "group": group_path})
-            log.info("starting data store for group '%s'" % group)
-            component_states.start_component("data_store", group_path,
-                                             statefile="/tmp/state.data_store_%s" % group,
-                                             dispatcher=me_rpc, msgbus_opts=" ".join(msgbus_arr))
-        else:
-            log.info("asking data store for group '%s' to resubscribe" % mong["group"])
-            send_rpc(zmq_context, mong["cmd_port"], "resubscribe")
-
-
-    #
-    # and now the job aggregators
-    #
-    # TODO: do this more smartly, such that the entire function can be used for restarting components that failed.
-    #
-    # when we are not restarting, we just look after job_aggs that have failed and restart them
-    # when we are restarting, we need the whole shebang on new and finished jobs and retagging
-    # when collectors were restarted, subscribers need to resubscribe
-    #
-    for cmd_port in get_collectors_cmd_ports():
-        log.info("asking collector '%s' to reset tags" % cmd_port)
-        send_rpc(zmq_context, cmd_port, "reset_tags")
-
-    jaggs = component_states.get_state({"component": "job_agg"})
-    job_list_keys = job_list.keys()
-    for jobid, jcomp in jaggs.items():
-        if "outdated!" in jcomp or "exited!" in jcomp or jobid not in job_list_keys:
-            remove_job_agg_instance(jobid)
-            # what if this process has crashed?
-
-    if program_start or program_restart:
-        log.info("fixup job_aggs: %r" % job_list)
-        for jobid, j in job_list.items():
-            log.info("fixup: jobid %s" % jobid)
-            if jobid not in jaggs:
-                # start aggregators for new jobs
-                # these will subscribe themselves to collectors
-                if len(j["cnodes"]) >= config["services"]["job_agg"]["min_nodes"]:
-                    create_job_agg_instance(jobid)
-            else:
-                # old job_aggs
-                # ask these ones to re-subscribe
-                cmd_port = jaggs[jobid]["cmd_port"]
-                send_rpc(zmq_context, cmd_port, "resubscribe")
-                # create timers for already running job_aggs
-                make_timers(jobid)
-
-            # add tagging for running jobs
-            nodes = j["cnodes"]
-            if len(nodes) == 1:
-                nodesmatch = nodes[0]
-            else:
-                nodesmatch = "RE:^(%s)$" % "|".join(nodes)
-            for cmd_port in get_collectors_cmd_ports():
-                log.info("adding tag for job '%s' on collector '%s'" % (jobid, cmd_port))
-                send_rpc(zmq_context, cmd_port, "add_tag", TAG_KEY="J", TAG_VALUE=jobid, H=nodesmatch)
 
 
 def check_restart_collectors(config, component_states):
