@@ -467,6 +467,9 @@ def get_current_job_tags():
 
     tags = set()
     tags_resp = send_rpc(zmq_context, me_rpc, "show_tags")
+    if tags_resp is None:
+        log.warning("show_tags request wasn't answered. are any collectors running?")
+        return tags
     for collector in tags_resp.keys():
         for tag in tags_resp[collector].keys():
             if tag.startswith("J:"):
