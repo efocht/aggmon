@@ -121,8 +121,8 @@ setup(
                   "aggmon.agg_mcache", "aggmon.basic_aggregators", "aggmon.quantiles",
                   "metric_store.mongodb_store", "res_mngr.pbsnodes"],
     data_files = [("/etc/aggmon", ["config.d/config.yaml", "config.d/aggregate.yaml", "config.d/agg-templates.yaml"]),
-                  ("/etc/init.d", ["misc/aggmon"]),
-                  ("/etc/systemd/system", ["misc/aggmon.service"]),
+                  #("/etc/init.d", ["misc/aggmon"]),
+                  ("/etc/systemd/system", ["aggmon.service"]),
                   ("/usr/local/sbin", ["bin/agg_cmd", "bin/agg_collector", "bin/agg_control", "bin/agg_datastore", "bin/agg_jobagg", "bin/gmond_wrapper"])],
 )
 
