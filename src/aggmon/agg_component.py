@@ -188,15 +188,14 @@ class ComponentStatesRepo(object):
                 log.debug("kill_component (listen) res=%r" % res)
         else:
             # kill process using the remembered pid. This could be dangerous as we could kill another process.
+            res = True
             try:
                 exec_cmd = self.config["global"]["remote_kill"] % state
                 out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
                 #send_rpc(self.zmq_context, self.dispatcher, "del_component_state", **msg)
-                res = True
                 log.debug("kill_component (kill) res=%r" % res)
             except Exception as e:
                 log.error("subprocess error when running '%s' : '%r'" % (exec_cmd, e))
-                res = False
         if res:
             res = self.del_state(msg)
             log.debug("kill_component deleting state %r" % res)
