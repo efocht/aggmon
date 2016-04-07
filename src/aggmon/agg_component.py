@@ -362,6 +362,8 @@ class ComponentStatesRepo(object):
               "restart": restart running components
               ...?
         """
+        if not os.path.exists(state_file):
+            return None
         log.info("load_state from %s" % state_file)
         try:
             fp = open(state_file)
