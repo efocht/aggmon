@@ -5,6 +5,7 @@ import copy
 import json
 import logging
 import os
+import os.path
 import pdb
 import sys
 import time
@@ -153,7 +154,11 @@ def load_config( config_file ):
 
     global config, aggregate
 
-    import yaml
+    try:
+        import yaml
+    except ImportError:
+        print("Cannot find python module yaml")
+        sys.exit(1)
 
     files = []
     if os.path.isdir(config_file):
@@ -221,6 +226,17 @@ def load_config( config_file ):
             agg.update(tpl)
         agg.update(orig_attrs)
 
+def create_pidfile(fname):
+    try:
+        f = open(fname, "w")
+        f.write(str(os.getpid())+"\n")
+        f.close()
+    except:
+        raise Exception("Cannot create pid file '%s'" % (fname))
+
+def clean_pidfile(fname):
+    if os.path.exists(fname):
+        os.remove(fname)
 
 def get_collectors_cmd_ports():
     global component_states
@@ -603,6 +619,7 @@ def aggmon_control(argv):
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
     ap.add_argument('-L', '--loop-time', default=30, action="store", help="control loop time, default 30s")
     ap.add_argument('-S', '--state-file', default="agg_control.state", action="store", help="file to store state")
+    ap.add_argument('-p', '--pid-file', default="agg_control.pid", action="store", help="file to pid")
     ap.add_argument('-k', '--kill', default=False, action="store_true", help="kill components that were left running")
     ap.add_argument('-q', '--quick', default=False, action="store_true",
                     help="kill components that were left running quickly, without waiting for 70s")
@@ -619,6 +636,8 @@ def aggmon_control(argv):
     if len(config["resource_manager"]["master"]) == 0:
         log.error("No master node specified for the resource manager! Exitting!")
         sys.exit(1)
+
+    create_pidfile(pargs.pid_file)
 
     zmq_context = zmq.Context()
 
@@ -672,6 +691,7 @@ def aggmon_control(argv):
             component_states.kill_components(["collector", "data_store", "job_agg"])
             time.sleep(10)
             component_states.save_state(None, pargs.state_file)
+        clean_pidfile(pargs.pid_file)
         os._exit(0)
         # not sure why the sys.exit(0) does not work here
         sys.exit(0)
@@ -721,6 +741,7 @@ def aggmon_control(argv):
             log.error("main thread exception: %r" % e)
             break
     print "THE END"
+    clean_pidfile(pargs.pid_file)
     os._exit(0)
     #rpc.join()
     
