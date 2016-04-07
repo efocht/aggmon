@@ -712,7 +712,7 @@ def aggmon_control(argv):
             end_time = time.time()
             sleep_time = pargs.loop_time - (end_time - start_time)
             if sleep_time > 0:
-                log.info("sleeping %f2.1s" % sleep_time)
+                log.info("sleeping %fs" % sleep_time)
                 time.sleep(sleep_time)
             else:
                 log.info("component control time exceeded the loop time by %fs. Consider increasing it!" % abs(sleep_time))
