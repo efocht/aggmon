@@ -2,9 +2,10 @@ NAME = quantiles
 SRCS = $(wildcard *.cpp)
 OBJS = $(SRCS:%.cpp=%.o)
 SONAME = $(NAME).so
-PYINCDIR = $(shell python-config --include)
-PYLIBDIR = $(shell python-config --exec-prefix)/lib
-LINKLIBS = -L$(PYLIBDIR) $(shell python-config --libs) -lboost_python -ldl
+PYVER=$(shell python2 -c 'import sys, re; print re.match("(\d+.\d+).\d+", sys.version).group(1)')
+PYINCDIR = $(shell /usr/bin/python$(PYVER)-config --includes) -I/usr/include/boost
+PYLIBDIR = $(shell /usr/bin/python$(PYVER)-config --exec-prefix)/lib
+LINKLIBS = $(shell /usr/bin/python$(PYVER)-config --ldflags) -L/usr/lib/x86_64-linux-gnu/ -lboost_python -ldl
 CFLAGS = -I./
 #CFLAGS += -H -DDEBUG -ggdb
 CFLAGS += -fPIC -O2
@@ -17,7 +18,7 @@ LD = gcc
 all: $(SONAME) $(OBJS) Makefile
 
 $(SONAME): $(OBJS) Makefile
-	$(LD) $(LDFLAGS) -o $(SONAME) $(LINKLIBS) $(OBJS)
+	$(LD) $(LDFLAGS) $(OBJS) -o $(SONAME) $(LINKLIBS)
 	ldd -r $(SONAME) | grep undefined || :
 
 %.o: %.cpp
