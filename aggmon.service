@@ -1,0 +1,27 @@
+[Unit]
+Description=aggmon monitoring and aggregation infrasturcture
+Documentation=man:foo(1)
+Requires=network.target
+Wants=mongodb.service
+
+[Service]
+Type=simple
+
+Environment=statedir=/var/cache/aggmon
+Environment=agg_configdir=/etc/aggmon
+Environment=agg_statedir=/var/lib/aggmon
+Environment=agg_statefile=/var/lib/aggmon/agg_control.state
+Environment=agg_pidfile=/var/run/agg_control.pid
+PIDFile=/var/lib/aggmon/agg_control.pid
+ExecStartPre=/bin/mkdir -p ${statedir}
+ExecStartPre=/bin/mkdir -p ${agg_statedir}
+ExecStart=/usr/local/sbin/agg_control -c ${agg_configdir} \
+                                      --state-file ${agg_statefile} \
+                                      --pid-file ${agg_pidfile} 
+ExecStop=/usr/local/sbin/agg_control -c ${agg_configdir} \
+                                     --state-file ${agg_statefile} \
+                                     --pid-file ${agg_pidfile} \
+                                     --kill
+ExecStopPost=/bin/kill < "${agg_pidfile}"
+[Install]
+WantedBy=multi-user.target
