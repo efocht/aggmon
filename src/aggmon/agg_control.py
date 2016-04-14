@@ -7,6 +7,7 @@ import logging
 import os
 import os.path
 import pdb
+import signal
 import sys
 import time
 import traceback
@@ -73,6 +74,9 @@ zmq_context = None
 
 # list of running jobs, as fresh as the mongodb collection
 job_list = {}
+
+# controls main program loop
+main_stopping = False
 
 ##
 # default configuration data
@@ -609,9 +613,16 @@ def component_control():
     # actually handled in data_store restart, but may be wrong
 
 
+def sig_handler(signum, stack):
+    global main_stopping
+    log.info("Received signal %d" % signum)
+    if signum in (signal.SIGINT, signal.SIGQUIT, signal.SIGHUP, signal.SIGTERM):
+        main_stopping = True
+
+
 def aggmon_control(argv):
 
-    global component_states, scheduler, zmq_context, me_rpc, job_list
+    global component_states, scheduler, zmq_context, me_rpc, job_list, main_stopping
     
     ap = argparse.ArgumentParser()
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5558", action="store", help="RPC command port")
@@ -639,14 +650,17 @@ def aggmon_control(argv):
 
     create_pidfile(pargs.pid_file)
 
+    for signum in (signal.SIGINT, signal.SIGQUIT, signal.SIGHUP, signal.SIGTERM):
+        signal.signal(signum, sig_handler)
+    
     zmq_context = zmq.Context()
 
     me_addr = zmq_own_addr_for_uri("tcp://8.8.8.8:10000")
 
     rpc = RPCThread(zmq_context, listen=pargs.cmd_port)
 
-    scheduler = Scheduler()
-    scheduler.start()
+    #scheduler = Scheduler()
+    #scheduler.start()
 
     me_rpc = "tcp://%s:%d" % (me_addr, rpc.port)
     component_states = ComponentStatesRepo(config, me_rpc, zmq_context)
@@ -671,6 +685,8 @@ def aggmon_control(argv):
     log.info("registered rpcs")
 
     if not pargs.kill:
+        scheduler = Scheduler()
+        scheduler.start()
         # connect to the top level database. the one which stores the job lists
         dbconf = config["database"]
         #store = MongoDBJobList(host_name=dbconf["dbhost"], port=None, db_name=dbconf["jobdbname"],
@@ -678,7 +694,7 @@ def aggmon_control(argv):
 
     # TODO: add smart starter of components: check/load saved state, query a resend,
     #       kill and restart if no update?
-    res = component_states.load_state(pargs.state_file, mode = (pargs.kill and pargs.quick) and "kill" or "keep")
+    res = component_states.load_state(pargs.state_file)
     log.info("component_states_load returned %r" % res)
 
     if pargs.kill:
@@ -691,6 +707,8 @@ def aggmon_control(argv):
             component_states.kill_components(["collector", "data_store", "job_agg"])
             time.sleep(10)
             component_states.save_state(None, pargs.state_file)
+        rpc.stop()
+        rpc.join()
         clean_pidfile(pargs.pid_file)
         os._exit(0)
         # not sure why the sys.exit(0) does not work here
@@ -706,26 +724,10 @@ def aggmon_control(argv):
         log.info("Restarting: waiting 70 seconds for state messages to come in ...")
         time.sleep(70)
 
-    #job_list = {}
-    #for j in store.find():
-    #    jobid = j["name"]
-    #    if "cnodes" in j:
-    #        job_list[jobid] = {"cnodes": j["cnodes"]}
-    #    else:
-    #        log.warning("loading job_list: skipping job without nodes! jobid=%s" % jobid)
-    #
-    #start_fixups(program_restart=((res is not None) and True or False),
-    #             program_start=((res is None) and True or False))
-
-
-    #time.sleep(30)
-    #kill_component("collector", "universe")
-    #kill_component("data_store", "universe")
-
     #
     # TODO: loop and restart failed components...?
     #
-    while True:
+    while not main_stopping:
         try:
             start_time = time.time()
             component_control()
@@ -733,14 +735,19 @@ def aggmon_control(argv):
             sleep_time = pargs.loop_time - (end_time - start_time)
             if sleep_time > 0:
                 log.info("sleeping %fs" % sleep_time)
-                time.sleep(sleep_time)
+                while not main_stopping and time.time() < start_time + pargs.loop_time:
+                    time.sleep(0.5)
             else:
                 log.info("component control time exceeded the loop time by %fs. Consider increasing it!" % abs(sleep_time))
         except Exception as e:
             log.error(traceback.format_exc())
             log.error("main thread exception: %r" % e)
-            break
+            main_stopping = True
     print "THE END"
+    rpc.stop()
+    rpc.join()
+    scheduler.stop()
+    scheduler.join()
     clean_pidfile(pargs.pid_file)
     os._exit(0)
     #rpc.join()
