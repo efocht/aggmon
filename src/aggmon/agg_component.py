@@ -351,16 +351,11 @@ class ComponentStatesRepo(object):
             res = True
         return res
 
-    def load_state(self, state_file, mode="keep"):
+    def load_state(self, state_file):
         """
         Load component state from disk or database.
         Parameters:
         state_file: the file name where the state is saved
-        mode: load mode: can be:
-              "keep": keep running components
-              "kill": expecting to kill running components, no resend requested
-              "restart": restart running components
-              ...?
         """
         if not os.path.exists(state_file):
             return None
@@ -388,11 +383,6 @@ class ComponentStatesRepo(object):
                 # it will disappear if the component sends a component update message
                 # thus it is used for marking non-working components
                 self.repo[component][ckey]["outdated!"] = True
-                #if mode == "keep":
-                #    self.request_resend(cstate)
-                #    time.sleep(0.001)
-                #elif mode == "kill":
-                #    pass
         return True
 
     def save_state(self, __msg, state_file):

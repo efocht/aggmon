@@ -3,6 +3,7 @@ import os
 import pdb
 import socket
 import threading
+import time
 import traceback
 try:
     import ujson as json
@@ -130,7 +131,7 @@ class RPCThread(threading.Thread):
     def rpc_server(self):
         while not self.stopping:
             try:
-                s = self.responder.recv()
+                s = self.responder.recv(flags=zmq.NOBLOCK)
                 msg = json.loads(s)
                 log.debug( "rpc_server received: %r" % msg )
                 if "CMD" in msg:
@@ -165,9 +166,17 @@ class RPCThread(threading.Thread):
                         log.debug( "sending RPC reply msg: %r" % rep_msg )
                         self.responder.send(rep_msg)
 
+            except zmq.ZMQError as e:
+                if e.errno == zmq.EAGAIN:
+                    time.sleep(0.001)
+                    continue
+                else:
+                    raise ZMQError(e)
             except Exception as e:
                 log.error(traceback.format_exc())
                 log.error( "Exception in RPC server: %r" % e )
                 log.error( "RPC server: cmd=%s msg=%r" % (cmd, msg) )
                 break
 
+    def stop(self):
+        self.stopping = True
