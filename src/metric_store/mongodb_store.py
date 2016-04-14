@@ -14,14 +14,15 @@ import sys
 import time
 import datetime
 from pymongo import MongoClient, ASCENDING, DESCENDING
-from pymongo.son_manipulator import AutoReference, NamespaceInjector
 from bson.code import Code
+from bson.objectid import ObjectId
 
 __all__ = ["MongoDBMetricStore", "MongoDBJobList", "MongoDBJobStore", "MongoDBStatusStore"]
 
 # Constants
 MAX_RECORDS = 1500
 METRIC_TTL = 900
+PARTITION_TIMEFRAME = 60 * 60 * 24 * 30
 
 
 class MongoDBStore(object):
@@ -43,8 +44,54 @@ class MongoDBStore(object):
         self.db = self._client[db_name]
         if username and password:
             self.db.authenticate(username, password, mechanism='MONGODB-CR')
-#        self.db.add_son_manipulator( NamespaceInjector() )
-#        self.db.add_son_manipulator( AutoReference( self.db ) )
+
+    def get_collection( self, name, arg_str="" ):
+        """
+        e.g. invocation
+            db.get_collection( "log", "{capped: true, size: 5242880, max: 5000}" )
+            db.get_collection( "metric_universe", "{partitioned: true, primaryKey: {T: 1, _id: 1}}" )
+
+	Note: The second argument must be a string that contains vaild JavaScript!
+        """
+        if name not in self.db.collection_names():
+            # create collection with provided args 
+            eval_str = "db.createCollection(\"" + name + "\""
+            eval_str += ", " + arg_str if arg_str else ""
+            eval_str += ")"
+            #print "eval_str: ", eval_str
+            try:
+                self.db.eval( eval_str )
+                col = self.db[name]
+            except Exception, e:
+                raise Exception("Failed to create collection, %s" % str( e ))
+        else:
+            # collection exists
+            attrib = "partitioned"
+            col = self.db[name]
+            eval_str = "db." + name + ".stats()" + "." + attrib
+            #print eval_str
+            try:
+                partitioned = self.db.eval( eval_str )
+            except Exception, e:
+                raise Exception("Failed to query partitioned attribute, %s" % str( e ))
+            if partitioned:
+                # check if there are records older than PARTITION_TIMEFRAME
+                gen_time = datetime.datetime.utcfromtimestamp( int( time.time() ) - PARTITION_TIMEFRAME)
+                dummy_id = ObjectId.from_datetime( gen_time )
+                if col.find( {"_id": {"$lt": dummy_id}} ).count() > 0:
+                    # create new partition (only possible in Percona aka TokuMX)
+                    try:
+                        eval_str = "db." + name + ".addPartition()"
+		        #print "eval_str: ", eval_str
+                        self.db.eval( eval_str )
+                        col = self.db[name]
+                    except Exception, e:
+                        raise Exception("Failed to add partition, %s" % str( e ))
+        return col
+
+    def close( self ):
+        self._client.fsync()
+        self._client.close()
 
     @staticmethod
     def group_suffix( group ):
@@ -56,11 +103,9 @@ class MongoDBJobList(MongoDBStore):
     """
     List of currently running Jobs.
     """
-    """
-    """
     def __init__( self, col_name="job_list", **kwds ):
         MongoDBStore.__init__( self, **kwds )
-        self.__col_job_list = self.db[col_name]
+        self.__col_job_list = self.get_collection( col_name )
         self.__col_job_list.ensure_index( [("name", ASCENDING)], unique=True )
 
     def addJob( self, metric ):
@@ -88,23 +133,17 @@ class MongoDBJobList(MongoDBStore):
 class MongoDBMetricStore(MongoDBStore):
     """
     Numerical (Ganglia style) metrics
-
-    In TokuMX we use partitioned collections.
-    For now, pre-create the value collection before starting the aggmon daemon
-    eg. by:
-
-    db.createCollection('metric_universe', {primaryKey: {T:1, _id:1}, partitioned: true})
-
+    Note: In Percona / TokuMX partitioned collections are used.
     """
     def __init__(self, group="/universe", md_col="metric_md", val_col="metric",
                  val_ttl=3600*24*180, **kwds):
         MongoDBStore.__init__( self, **kwds )
         self._group = group
-        self._col_md = self.db[md_col]
+        self._col_md = self.get_collection( md_col )
         self._col_md_name = md_col
         self._col_val_base = val_col
         self._col_val_name = val_col + "_" + MongoDBStore.group_suffix( group )
-        self._col_val = self.db[self._col_val_name]
+        self._col_val = self.get_collection( self._col_val_name, "{partitioned: true, primaryKey: {T: 1, _id: 1}}" )
         self._val_ttl = val_ttl
         try:
             # index for metadata
@@ -269,7 +308,7 @@ class MongoDBJobStore(MongoDBStore):
         self._group = group
         self._col_base = col
         self._col_name = col + "_" + MongoDBMetricStore.group_suffix( group )
-        self._col = self.db[self._col_name]
+        self._col = self.get_collection( self._col_name )
         self._col_ttl = val_ttl
         try:
             # indices for job data
@@ -308,7 +347,7 @@ class MongoDBStatusStore(MongoDBStore):
         self._group = group
         self._col_base = col
         self._col_name = col + "_" + MongoDBMetricStore.group_suffix( group )
-        self._col = self.db[self._col_name]
+        self._col = self.get_collection( self._col_name )
         self._col_ttl = val_ttl
         try:
             # indices for status data
@@ -344,6 +383,7 @@ class MongoDBStatusStore(MongoDBStore):
 # Below is the original version of the MetricStore, for reference.
 # TODO: delete once the new version is implemented.
 #
+from pymongo.son_manipulator import AutoReference, NamespaceInjector
 class MongoDBMetricStoreOrig(MongoDBStore):
     def __init__( self, col_log_metadata="log_metadata", col_job_metric="job_metric",
                   ts_log_prefix="logts", **kwds ):
