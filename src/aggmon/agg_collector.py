@@ -17,6 +17,7 @@ import socket
 import sys
 import threading
 import time
+import traceback
 try:
     import ujson as json
 except ImportError:
@@ -364,13 +365,6 @@ def aggmon_collector(argv):
                         pass
         return msg
 
-    context = zmq.Context()
-    subq = SubscriberQueue(context, pargs.listen, pre=[spoofed_host, convert_str_int_float])
-
-    tagger = MsgTagger(tags=tags)
-    pubsub = AggPubThread(context, subq.queue, subs=subs, tagger=tagger.do_tag)
-
-    
     def save_subs_tags(msg):
         save_state(pargs.state_file, [pubsub.subs, tagger.tags])
 
@@ -379,8 +373,19 @@ def aggmon_collector(argv):
         # raw exit for now
         os._exit(0)
 
-    rpc = RPCThread(context, listen=pargs.cmd_port)
-    rpc.start()
+    try:
+        context = zmq.Context()
+        subq = SubscriberQueue(context, pargs.listen, pre=[spoofed_host, convert_str_int_float])
+
+        tagger = MsgTagger(tags=tags)
+        pubsub = AggPubThread(context, subq.queue, subs=subs, tagger=tagger.do_tag)
+    
+        rpc = RPCThread(context, listen=pargs.cmd_port)
+        rpc.start()
+    except Exception as e:
+        log.error(traceback.format_exc())
+        log.error("Failed to initialize something essential. Exiting.")
+        os._exit(1)
 
     rpc.register_rpc("subscribe", pubsub.subscribe, post=save_subs_tags)
     rpc.register_rpc("unsubscribe", pubsub.unsubscribe, post=save_subs_tags)

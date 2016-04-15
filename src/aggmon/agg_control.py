@@ -12,8 +12,8 @@ import sys
 import time
 import traceback
 import zmq
-from agg_component import ComponentStatesRepo, group_name
-from agg_rpc import send_rpc, zmq_own_addr_for_uri, RPCThread
+from agg_component import ComponentStatesRepo, group_name, ComponentDeadError
+from agg_rpc import send_rpc, zmq_own_addr_for_uri, RPCThread, RPC_TIMEOUT, RPCNoReplyError
 from scheduler import Scheduler
 from repeat_event import RepeatEvent
 from res_mngr import PBSNodes
@@ -350,14 +350,19 @@ def create_job_agg_instance(jobid):
 
 def cmd_to_collectors(context, cmd, msg, restrict=None):
     result = {}
+    failed = {}
     if isinstance(restrict, (list, set)):
         cmd_ports = restrict
     else:
         cmd_ports = get_collectors_cmd_ports()
     for cmd_port in cmd_ports:
         log.info("sending '%s' %r msg to '%s'" % (cmd, msg, cmd_port))
-        result[cmd_port] = send_rpc(context, cmd_port, cmd, **msg)
-    return result
+        try:
+            result[cmd_port] = send_rpc(context, cmd_port, cmd, **msg)
+        except RPCNoReplyError as e:
+            log.warning("$r" % e)
+            failed[cmd_port] = True
+    return (result, failed,)
 
 
 def remove_job_agg_instance(jobid):
@@ -377,20 +382,12 @@ def remove_job_agg_instance(jobid):
         return
 
     log.info("remove_job_agg_instance: jobid=%s" % jobid)
-    if "removing" not in jagg:
-        # mark state as "removing"
-        jagg["removing"] = True
-        component_states.set_state(jagg, _time_update_=False)
-        method = "msg"
-    else:
-        # second try, no try hard kill
-        method = "kill"
-    component_states.kill_component("job_agg", "/universe", jobid=jobid, METHOD=method)
+    component_states.kill_component("job_agg", "/universe", jobid=jobid)
     #
     # notify collectors and unsubscribe disappearing jobid !!!!!!!!!!!!!!!!!!!!
     #
     log.info("remove_job_agg_instance: unsubscribing jobid=%s" % jobid)
-    res = cmd_to_collectors(zmq_context, "unsubscribe", {"TARGET": jagg["listen"]})
+    res, fails = cmd_to_collectors(zmq_context, "unsubscribe", {"TARGET": jagg["listen"]})
     log.info("remove_job_agg_instance: unsubscribe done")
     return res
 
@@ -443,7 +440,7 @@ def check_restart_collectors(config, component_states):
         pub = component_states.get_state({"component": "collector", "group": group_path})
         if pub == {} or "outdated!" in pub:
             if "outdated!" in pub:
-                component_states.del_state({"component": "collector", "group": group_path})
+                component_states.kill_component("collector", group_path)
             component_states.start_component("collector", group_path, statefile="/tmp/state.agg_collector_%s" % group,
                                              dispatcher=me_rpc)
             coll_started.append(group_path)
@@ -461,7 +458,7 @@ def check_restart_data_stores(config, component_states):
         mong = component_states.get_state({"component": "data_store", "group": group_path})
         if mong == {} or "outdated!" in mong:
             if "outdated!" in mong:
-                component_states.del_state({"component": "data_store", "group": group_path})
+                component_states.kill_component("data_store", group_path)
             log.info("starting data store for group '%s'" % group)
             component_states.start_component("data_store", group_path,
                                              statefile="/tmp/state.data_store_%s" % group,
@@ -483,13 +480,15 @@ def get_current_job_tags():
     """
     Ask all collectors for their job tags. Merge these into one set.
     """
-    global zmq_context, me_rpc
+    global zmq_context
 
     tags = set()
-    tags_resp = send_rpc(zmq_context, me_rpc, "show_tags")
-    if tags_resp is None:
-        log.warning("show_tags request wasn't answered. are any collectors running?")
-        return tags
+    #tags_resp = send_rpc(zmq_context, me_rpc, "show_tags")
+    tags_resp, failed = cmd_to_collectors(zmq_context, "show_tags", {})
+    if len(failed) > 0:
+        log.warning("Collectors %s failed for 'show_tags' command" % ", ".join(failed.keys()))
+    if len(tags_resp) == 0:
+        raise ComponentDeadError("all collectors")
     for collector in tags_resp.keys():
         for tag in tags_resp[collector].keys():
             if tag.startswith("J:"):
@@ -526,7 +525,11 @@ def component_control():
     fresh_joblist = set(fresh_job_nodes.keys())
 
     # get old job list
-    current_tags = get_current_job_tags()
+    try:
+        current_tags = get_current_job_tags()
+    except ComponentDeadError as e:
+        log.error("Collector(s) didn't reply: %r" % e)
+        return
 
     # restart outdated job aggs which actually should be running
     # and stop those which should be finished
@@ -586,8 +589,8 @@ def component_control():
         else:
             nodesmatch = "RE:^(%s)$" % "|".join(jnodes)
         cmd_to_collectors(zmq_context, "add_tag", {"H": nodesmatch,
-                                                     "TAG_KEY": "J",
-                                                     "TAG_VALUE": jobid},
+                                                   "TAG_KEY": "J",
+                                                   "TAG_VALUE": jobid},
                           restrict=coll_started_cmd_ports)
 
     # tags and subscriptions for old job aggs fresh_joblist.intersection(current_tags)
@@ -598,8 +601,8 @@ def component_control():
         else:
             nodesmatch = "RE:^(%s)$" % "|".join(jnodes)
         cmd_to_collectors(zmq_context, "add_tag", {"H": nodesmatch,
-                                                     "TAG_KEY": "J",
-                                                     "TAG_VALUE": jobid},
+                                                   "TAG_KEY": "J",
+                                                   "TAG_VALUE": jobid},
                           restrict=coll_started_cmd_ports)
         jagg = component_states.get_state({"component": "job_agg", "jobid": jobid})
         if jagg is None or len(jagg) == 0:
@@ -678,10 +681,13 @@ def aggmon_control(argv):
     #                 post=component_states.save_state, post_args=[pargs.state_file])
     #rpc.register_rpc("reset_tags", lambda x: relay_to_collectors(zmq_context, "reset_tags", x),
     #                 post=component_states.save_state, post_args=[pargs.state_file])
-    rpc.register_rpc("show_tags", lambda x: relay_to_collectors(zmq_context, "show_tags", x))
-    rpc.register_rpc("reset_subs", lambda x: relay_to_collectors(zmq_context, "reset_subs", x),
+
+    rpc.register_rpc("show_tags", lambda x: cmd_to_collectors(zmq_context, "show_tags", x))
+    
+    rpc.register_rpc("reset_subs", lambda x: cmd_to_collectors(zmq_context, "reset_subs", x),
                      post=component_states.save_state, post_args=[pargs.state_file])
-    rpc.register_rpc("show_subs", lambda x: relay_to_collectors(zmq_context, "show_subs", x))
+    
+    rpc.register_rpc("show_subs", lambda x: cmd_to_collectors(zmq_context, "show_subs", x))
     log.info("registered rpcs")
 
     if not pargs.kill:

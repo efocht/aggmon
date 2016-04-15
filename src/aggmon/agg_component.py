@@ -98,6 +98,10 @@ class ComponentState(object):
         self.state.update(state)
 
 
+class ComponentDeadError(Exception):
+    pass
+
+        
 class ComponentStatesRepo(object):
     """
     Component states repository: this is the place where component states that are
@@ -164,7 +168,13 @@ class ComponentStatesRepo(object):
                 # trying the next node, if any
     
     
-    def kill_component(self, service, group_path, __CALLBACK=None, __CALLBACK_ARGS=[], METHOD="msg", **kwds):
+    def kill_component(self, service, group_path, __CALLBACK=None, __CALLBACK_ARGS=[], **kwds):
+        """
+        Kill a component. First attempt is by sending it a "quit" command.
+        This sets the "soft-fill" flag in the component state. When this flag is found at
+        a subsequent kill attempt, the kill will attempt to kill the process of the
+        component (hard kill).
+        """
         msg = {"component": service, "group": group_path}
         msg.update(kwds)
         res = False
@@ -174,10 +184,20 @@ class ComponentStatesRepo(object):
         if state is None:
             log.warning("component '%s' state not found. Don't know how to kill it." % service)
             return False
-        if METHOD == "msg":
+        # register callback
+        if __CALLBACK is not None:
+            key = service + ":" + component_key(self.config["services"][service]["component_key"], kwds)
+            self.component_kill_cb[key] = {"cb": __CALLBACK, "args": __CALLBACK_ARGS}
+        if "soft-kill" not in state:
             if "cmd_port" in state:
+                state["soft-kill"] = True
+                self.set_state(state, _time_update_=False)
                 # send "quit" cmd over RPC
-                reply = send_rpc(self.zmq_context, state["cmd_port"], "quit")
+                try:
+                    reply = send_rpc(self.zmq_context, state["cmd_port"], "quit")
+                except RPCNoReplyError as e:
+                    log.warning("Component did not reply, maybe it is dead already? %r" % e)
+                    reply = None
                 if reply is not None:
                     res = True
                 log.debug("kill_component (cmd_port) res=%r" % res)
