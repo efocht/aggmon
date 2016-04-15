@@ -74,7 +74,10 @@ class MongoDBStore(object):
                 partitioned = self.db.eval( eval_str )
             except Exception, e:
                 raise Exception("Failed to query partitioned attribute, %s" % str( e ))
-            if partitioned:
+            # TODO: re-enable when sure that this works correctly, otherwise
+            # we'll keep adding partitions on a system which has more data than
+            # that of a month
+            if partitioned and False:
                 # check if there are records older than PARTITION_TIMEFRAME
                 gen_time = datetime.datetime.utcfromtimestamp( int( time.time() ) - PARTITION_TIMEFRAME)
                 dummy_id = ObjectId.from_datetime( gen_time )
