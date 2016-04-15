@@ -16,7 +16,11 @@ RPC_TIMEOUT = int(os.environ.get("AGG_RPC_TIMEOUT", 5000)) # 5 seconds by defaul
 log = logging.getLogger( __name__ )
 
 
-def send_rpc(zmq_context, rpc_server, cmd, **kwds):
+class RPCNoReplyError(Exception):
+    pass
+
+
+def send_rpc(zmq_context, rpc_server, cmd, _RPC_TIMEOUT_=RPC_TIMEOUT, **kwds):
     """
     Send an rpc request to a command server.
     """
@@ -29,20 +33,26 @@ def send_rpc(zmq_context, rpc_server, cmd, **kwds):
     msg = json.dumps(kwds)
     log.debug("sending to %s RPC msg: %r" % (rpc_server, msg))
     socket.send(msg, flags=zmq.NOBLOCK)
+    result = None
     try:
-        events = poller.poll( timeout=RPC_TIMEOUT )
+        events = poller.poll( timeout=_RPC_TIMEOUT_ )
     except KeyboardInterrupt:
         return None
+    except Exception as e:
+        log.error("send_rpc failed with '%r'" % e)
     if len( events ) != 0:
         for sock, _event in events:
             reply = sock.recv_json()
             log.debug("received result msg: %r" % reply)
             if "RESULT" in reply:
-                return reply["RESULT"]
-    #log.debug("disconnecting from %s" % rpc_server)
+                result = reply["RESULT"]
+    else:
+        socket.disconnect(rpc_server)
+        socket.close()
+        raise RPCNoReplyError("RPC server at %s did not reply." % rpc_server)
     socket.disconnect(rpc_server)
     socket.close()
-
+    return result
 
 def zmq_socket_bind_range(sock, listen):
     """
