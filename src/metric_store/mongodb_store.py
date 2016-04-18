@@ -45,51 +45,58 @@ class MongoDBStore(object):
         if username and password:
             self.db.authenticate(username, password, mechanism='MONGODB-CR')
 
+    def _update_partition( self, name, partition_timeframe=PARTITION_TIMEFRAME ):
+        """
+        Check for partitioned collections if current partition is older than PARTITION_TIMEFRAME
+        abd if so add a new partition.
+        """
+        partition_timeframe = PARTITION_TIMEFRAME if partition_timeframe < 0 else partition_timeframe
+        attrib = "partitioned"
+        col = self.db[name]
+        eval_str = "db." + name + ".stats()" + "." + attrib
+        try:
+            partitioned = self.db.eval( eval_str )
+        except Exception, e:
+            raise Exception( "Failed to query partitioned attribute, %s" % str( e ) )
+        if partitioned:
+            # check if creation time of newest partition is older than now minus partition_timeframe
+            eval_str = "db." + name + ".getPartitionInfo().partitions["
+            eval_str += "db." + name + ".getPartitionInfo().numPartitions-1].createTime-0"
+            try:
+                creation_time = int( self.db.eval( eval_str ) / 1000 )
+            except Exception, e:
+                raise Exception( "Failed getting partition info, %s" % str( e ) )
+            #print "creation_time:", creation_time, "now:", int( time.time() ), "partition_timeframe:", partition_timeframe
+            if creation_time < int( time.time() ) - partition_timeframe:
+                # create new partition (only possible in Percona aka TokuMX)
+                try:
+                    eval_str = "db." + name + ".addPartition()"
+                    self.db.eval( eval_str )
+                except Exception, e:
+                    raise Exception( "Failed to add partition, %s" % str( e ) )
+
     def get_collection( self, name, arg_str="" ):
         """
         e.g. invocation
             db.get_collection( "log", "{capped: true, size: 5242880, max: 5000}" )
             db.get_collection( "metric_universe", "{partitioned: true, primaryKey: {T: 1, _id: 1}}" )
 
-	Note: The second argument must be a string that contains vaild JavaScript!
+        Note: The second argument must be a string that contains vaild JavaScript!
         """
         if name not in self.db.collection_names():
             # create collection with provided args 
             eval_str = "db.createCollection(\"" + name + "\""
             eval_str += ", " + arg_str if arg_str else ""
             eval_str += ")"
-            #print "eval_str: ", eval_str
             try:
                 self.db.eval( eval_str )
                 col = self.db[name]
             except Exception, e:
                 raise Exception("Failed to create collection, %s" % str( e ))
         else:
-            # collection exists
-            attrib = "partitioned"
-            col = self.db[name]
-            eval_str = "db." + name + ".stats()" + "." + attrib
-            #print eval_str
-            try:
-                partitioned = self.db.eval( eval_str )
-            except Exception, e:
-                raise Exception("Failed to query partitioned attribute, %s" % str( e ))
-            # TODO: re-enable when sure that this works correctly, otherwise
-            # we'll keep adding partitions on a system which has more data than
-            # that of a month
-            if partitioned and False:
-                # check if there are records older than PARTITION_TIMEFRAME
-                gen_time = datetime.datetime.utcfromtimestamp( int( time.time() ) - PARTITION_TIMEFRAME)
-                dummy_id = ObjectId.from_datetime( gen_time )
-                if col.find( {"_id": {"$lt": dummy_id}} ).count() > 0:
-                    # create new partition (only possible in Percona aka TokuMX)
-                    try:
-                        eval_str = "db." + name + ".addPartition()"
-		        #print "eval_str: ", eval_str
-                        self.db.eval( eval_str )
-                        col = self.db[name]
-                    except Exception, e:
-                        raise Exception("Failed to add partition, %s" % str( e ))
+            # collection exists, update it if required
+            self._update_partition( name )
+        col = self.db[name]
         return col
 
     def close( self ):
@@ -163,6 +170,13 @@ class MongoDBMetricStore(MongoDBStore):
         except Exception, e:
             raise Exception( "Failed to ensure index: %s" % str( e ) )
 
+
+    def update_partitions( self, partition_timeframe=-1, **kwds ):
+        """
+        Call update on all collections in MongoDBMetricStore.
+        """
+        for name in [self._col_md_name, self._col_val_name]:
+            self._update_partition( name=name, partition_timeframe=partition_timeframe, **kwds  )
 
     def insert_md( self, md ):
         hpath = md["CLUSTER"]

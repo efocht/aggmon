@@ -10,26 +10,33 @@ MongoDBMetricStore( db_name="metric_test" ).drop_all()
 #pdb.set_trace()
 store = MongoDBMetricStore( db_name="metric_test" )
 
-# add metric that is 50 days old
-epoch = int( time.time() ) - 60 * 60 * 24 * 50
-gen_time = datetime.datetime.utcfromtimestamp( epoch )
-store.insert_val( {"_id": ObjectId.from_datetime( gen_time ), "N": "load_one", "H": "localhost", "V": 3.14, "T": epoch} )
-
-# add metric with current time
+# add metric
 epoche = int( time.time() )
 store.insert_val( {"N": "load_one", "H": "localhost", "V": 2.71, "T": epoche} )
+store.insert_val( {"N": "load_one", "H": "localhost", "V": 3.14, "T": epoche} )
 for r in store.find_val():
     print r
 store.close()
 
 # create another MongoDBMetricStore object (this should NOT create a new partition)
 store = MongoDBMetricStore( db_name="metric_test" )
-epoche += 1
+epoche = int( time.time() )
 store.insert_val( {"N": "load_one", "H": "localhost", "V": 5.08, "T": epoche} )
+store.insert_val( {"N": "load_one", "H": "localhost", "V": 6.66, "T": epoche} )
 
-# at this point there should be
-#    one partition with two records and
-#    a second partition with one entry
+# wait and create a new partition if current partition is older than 4 seconds
+time.sleep( 5 )
+epoche = int( time.time() )
+store.update_partitions( partition_timeframe=4 )
+store.insert_val( {"N": "load_one", "H": "localhost", "V": 7.07, "T": epoche} )
+store.insert_val( {"N": "load_one", "H": "localhost", "V": 8.00, "T": epoche} )
+
+# force creation of a new partition
+epoche = int( time.time() )
+store.update_partitions( partition_timeframe=0 )
+store.insert_val( {"N": "load_one", "H": "localhost", "V": 9.81, "T": epoche} )
+store.insert_val( {"N": "load_one", "H": "localhost", "V": 0.33, "T": epoche} )
+
 for r in store.find_val():
     print r
 
