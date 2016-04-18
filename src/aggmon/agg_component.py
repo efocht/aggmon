@@ -12,6 +12,7 @@ from repeat_timer import RepeatTimer
 
 log = logging.getLogger( __name__ )
 DEFAULT_PING_INTERVAL = 60
+KILL_WAIT_TIMEOUT = 10
 
 
 def get_kwds(**kwds):
@@ -188,28 +189,50 @@ class ComponentStatesRepo(object):
         if __CALLBACK is not None:
             key = service + ":" + component_key(self.config["services"][service]["component_key"], kwds)
             self.component_kill_cb[key] = {"cb": __CALLBACK, "args": __CALLBACK_ARGS}
-        if "soft-kill" not in state:
-            if "cmd_port" in state:
-                state["soft-kill"] = True
-                self.set_state(state, _time_update_=False)
-                # send "quit" cmd over RPC
-                try:
-                    reply = send_rpc(self.zmq_context, state["cmd_port"], "quit")
-                except RPCNoReplyError as e:
-                    log.warning("Component did not reply, maybe it is dead already? %r" % e)
-                    reply = None
-                if reply is not None:
-                    res = True
-                log.debug("kill_component (cmd_port) res=%r" % res)
-            elif "listen" in state:
-                # send "quit" cmd over PULL port
-                send_agg_command(self.zmq_context, state["listen"], "quit")
-                res = True
-                log.debug("kill_component (listen) res=%r" % res)
-        else:
+        if "cmd_port" not in state:
+            log.error("cmd_port not found in state: %r" % state)
+            return False
+
+        # is the process running? check with "ps"
+        status = self.process_status(state)
+        if status == "not found":
+            res = self.del_state(msg)
+            log.debug("kill_component deleting state %r" % res)
+            return True
+        elif status == "unknown":
+            log.error("process status found as '%s'. Aborting kill." % status)
+            return False
+        
+        # send "quit" cmd over RPC
+        try:
+            reply = send_rpc(self.zmq_context, state["cmd_port"], "quit")
+            res = True
+        except RPCNoReplyError as e:
+            log.warning("Component did not reply, maybe it is dead already? %r" % e)
+            reply = None
+
+        # wait ... seconds and check if process has disappeared
+        start_wait = time.time()
+        while time.time() - start_wait < KILL_WAIT_TIMEOUT:
+            status = self.process_status(state)
+            #
+            # This wait loop is disabled right now (by the -1000).
+            # It took too long for the processes to die.
+            #
+            break
+            if status == "running":
+                time.sleep(1)
+            elif status == "not found":
+                log.info("status changed to 'not found'")
+                break
+            elif status == "unknown":
+                return False
+        log.info("status for pid=%d is '%s'" % (state["pid"], status))
+        if status == "running":
             # kill process using the remembered pid. This could be dangerous as we could kill another process.
             res = True
             try:
+                log.info("attempting hard-kill of pid %d" % state["pid"])
                 exec_cmd = self.config["global"]["remote_kill"] % state
                 out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
                 #send_rpc(self.zmq_context, self.dispatcher, "del_component_state", **msg)
@@ -237,6 +260,34 @@ class ComponentStatesRepo(object):
                             self.kill_component(comp_type, group_path, jobid=jobid, METHOD="kill")
 
 
+    def process_status(self, component_state):
+        """
+        Find out process status returned by the ps command, return "running", "not found" or "unkown".
+        """
+        if "pid" not in component_state:
+            log.warning("pid not found in component state: %r" % component_state)
+            return None
+        status = "unknown"
+        try:
+            pid = component_state["pid"]
+            host = component_state["host"]
+            service = component_state["component"].replace("_", "")
+            exec_cmd = self.config["global"]["remote_status"] % locals()
+            log.info("starting subprocess: %s" % exec_cmd)
+            out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
+            log.info("output: '%s'" % out)
+            if out.find(service) >=0:
+                status = "running"
+            else:
+                status = "not found"
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.error("subprocess error '%r'" % e)
+            log.error("subprocess error when running '%s' : '%r'" % (exec_cmd, e))
+            # trying the next node, if any
+        return status
+
+    
     def set_state(self, msg, _time_update_=True):
         """
         """
