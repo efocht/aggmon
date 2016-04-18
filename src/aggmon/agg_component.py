@@ -5,7 +5,7 @@ import pdb
 import subprocess
 import time
 import traceback
-from agg_rpc import send_rpc, zmq_own_addr_for_tgt
+from agg_rpc import send_rpc, zmq_own_addr_for_tgt, RPCNoReplyError
 from agg_job_command import send_agg_command
 from repeat_timer import RepeatTimer
 
