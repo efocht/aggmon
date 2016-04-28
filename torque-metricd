@@ -1,0 +1,566 @@
+#!/usr/bin/python2
+##########################################################################
+#                                                                        #
+#               Copyright (C) 2013 - 2015 NEC HPC Europe.                #
+#                                                                        #
+#  These coded instructions, statements, and computer programs  contain  #
+#  unpublished  proprietary  information of NEC HPC Europe, and are      #
+#  are protected by Federal copyright law.  They  may  not be disclosed  #
+#  to  third  parties  or copied or duplicated in any form, in whole or  #
+#  in part, without the prior written consent of NEC HPC Europe.         #
+#                                                                        #
+##########################################################################
+#
+import ConfigParser
+import glob
+import hashlib
+import os
+import signal
+import subprocess
+import socket
+import sys
+import logging
+import logging.handlers
+import time
+import psutil
+import copy
+from metric_store import MongoDBMetricStore, MongoDBJobList, JMetric
+
+"""
+This script mainly parses the PBS Torque accounting events and puts these
+events as metrics into a database (MongoDB).
+Past events are retrieved from PBS Torque log files (backlog). After these
+files are read the script behaves similar to a "tail -f" command and watches
+for new events in the current log file.
+In addition to storing metrics in a database there are some other tasks (JobTask)
+that are executed on job start and stop events.
+"""
+
+class JobTask(object):
+    """ Interface definition for tasks to be executed on job start and stop events """
+    def addJob( self, metric ):
+        """ This method is called if an job "started" or "restarted" event is received """
+        raise NotImplementedException()
+
+    def removeJob( self, name ):
+        """ This method is called if an job "aborted", "checkpointed", "deleted" and "exited" event is received """
+        raise NotImplementedException()
+
+
+class JobCache(JobTask):
+    """ Temporary storage (memory) for Jobs with unique JobID (name) """
+    def __init__( self ):
+        self.__cache = {}
+        self.__early_delete = {}
+
+    def addJob( self, metric ):
+        name = metric["name"]
+        if self._is_early_delete(name):
+            del self.__early_delete[name]
+        else:
+            self.__cache[metric["name"]] = copy.deepcopy( metric )
+
+    def removeJob( self, name ):
+        if name in self.__cache:
+            del self.__cache[name]
+        else:
+            self.__early_delete[name] = True
+
+    def getList( self ):
+        return self.__cache.values()
+
+    def _in_cache( self, name ):
+        return name in self.__cache
+
+    def _is_early_delete( self, name ):
+        return name in self.__early_delete
+
+    def _get_early_deletes( self ):
+        return self.__early_delete
+
+    def _remove_early_delete( self, name ):
+        if name in self.__early_delete:
+            del self.__early_delete[name]
+
+
+class JobList(JobCache):
+    """ Permanent storage (MongoDB) for Jobs with unique JobID (name) """
+    def __init__( self, conf ):
+        super(JobList, self).__init__()
+        self.__create_joblist = conf["create_joblist"]
+        if self.__create_joblist:
+            self.__joblist = MongoDBJobList( host_name=conf["mongodb_host"], username=conf["mongodb_uname"], password=conf["mongodb_pw"] )
+
+    def addJob( self, metric ):
+        if self.__create_joblist:
+            super(JobList, self).addJob( metric )
+            if self._in_cache(metric["name"]):
+                self.__joblist.addJob( metric )
+
+    def removeJob( self, name ):
+        if self.__create_joblist:
+            super(JobList, self).removeJob( name )
+            if not self._is_early_delete(name):
+                self.__joblist.removeJob( name )
+
+    def getList( self ):
+        return self.__joblist.getList()
+
+    def finalize( self ):
+        "remove left-over early deletes"
+        for jname, metric in self._get_early_deletes().items():
+            self.__joblist.removeJob( jname )
+            self._remove_early_delete( jname )
+
+
+class Tagger(JobCache):
+    """ Execute an external program for currently running jobs that e.g. adds Job information to metrics"""
+    def __init__(self, conf ):
+        super(Tagger, self).__init__()
+        self.__call_tagger = conf["call_tagger"]
+        if not self.__call_tagger:
+            return
+        self.__cmd = conf["tagger_cmd"]
+        
+    def addJob( self, metric ):
+        if not self.__call_tagger:
+            return
+        super(Tagger, self).addJob( metric )
+        if self._in_cache(metric["name"]):
+            nodelist = []
+            if isinstance( metric["cnodes"], dict ):
+                nodelist = metric["cnodes"].keys()
+            elif isinstance( metric["cnodes"], list ):
+                nodelist = metric["cnodes"]
+            if len(nodelist) == 1:
+                regex_str = nodelist[0]
+            else:
+                regex_str = "RE:^(" + "|".join( nodelist ) + ")$"
+            #self.__invoke(self.__cmd, ACTION="add", CNODES_REGEX=regex_str, CNODES_CSV=csv_str, **metric )
+            self.__invoke(self.__cmd, "--add", "J", metric["name"], "H", "\"%s\"" % regex_str )
+
+    def removeJob( self, name ):
+        if not self.__call_tagger:
+            return
+        super(Tagger, self).removeJob( name )
+        if not self._is_early_delete(name):
+            self.__invoke(self.__cmd, "--del", "J", name )
+
+    def finalize( self ):
+        "remove left-over early deletes"
+        for jname, metric in self._get_early_deletes().items():
+            self.__invoke(self.__cmd, "--del", "J", jname )
+            self._remove_early_delete( jname )
+
+    @staticmethod
+    def __invoke( cmd, *params ):
+        r = 0
+        try:
+            args = ["/bin/bash", "-c", cmd % " ".join(params)]
+            r = subprocess.call( args )
+        except Exception as e:
+            log.debug( "exception while calling command: %s" % str( e ) )
+        if r != 0:
+            log.warn( "calling command (%s) failed!\nargs = %r\nenv = %r" % (cmd, args) )
+
+
+# Constants
+TORQUE_PROC = "pbs_server"
+TORQUE_ACCOUNTING_PATH = "/var/spool/torque/server_priv/accounting"
+TORQUE_LOG_MARKER = {"A" : "aborted",         # job has been aborted by server
+                     "C" : "checkpointed",    # job has been checkpointed and stopped
+                     "D" : "deleted",         # job has been deleted
+                     "E" : "exited",          # job has exited (either successfully or unsuccessfully)
+                     "Q" : "queued",          # job has been submitted/queued
+                     "R" : "rerun",           # an attempt to rerun the job has been made
+                     "S" : "started",         # an attempt to start the job has been made
+                     "T" : "restarted",       # an attempt to restart the job has been made (after checkpointed)
+                    }
+LOG_LEVELS = {"error"   : logging.ERROR,
+              "warning" : logging.WARNING,
+              "info"    : logging.INFO,
+              "debug"   : logging.DEBUG,
+             }
+CONF_FILE = "/etc/torque-metricd.conf"
+
+global tag_file
+global tag_new
+global acc_log
+global last_position
+
+CONFIG_DEFAULTS = {"acc_file_dir"   : TORQUE_ACCOUNTING_PATH,
+                   "tag_file"       : TORQUE_ACCOUNTING_PATH + "/tag",
+                   "max_acc_files"  : 7,
+                   "log_level"      : "warning",
+                   "to_syslog"      : "True",
+                   "mongodb_host"   : "localhost",
+                   "mongodb_dbname" : "metric",
+                   "mongodb_uname"  : "",
+                   "mongodb_pw"     : "",
+                   "include_cpus"   : "False",
+                   "call_tagger"    : "False",
+                   "create_joblist" : "True",
+                  }
+
+
+def sig_handler( sig, frame ):
+    if tag_new:
+        put_tag( tag_file, tag_new, last_position, acc_log )
+    log.info( "terminating due to signal %d..." % sig)
+    sys.exit( 0 )
+
+def md5sum( s ):
+    m = hashlib.md5()
+    m.update( s )
+    return m.hexdigest()
+
+def pidof( name ):
+    try:
+        return [p.pid for p in psutil.process_iter() if p.name() == name]
+    except:
+        # due to changes in psutil
+        return [p.pid for p in psutil.process_iter() if p.name == name]
+
+def torque_pid():
+    while True:
+        pids = pidof( TORQUE_PROC )
+        if pids:
+            return pids[0]
+        log.info( "waiting for Torque (%s) to start..." % TORQUE_PROC )
+        time.sleep( 60 )
+
+def is_file_open( pid, file_name ):
+    dir = os.path.join( "/proc", str( pid ), "fd" )
+    if not os.path.exists( dir ):
+        log.warn( "%s seems to have terminated!" % TORQUE_PROC )
+        return False
+    if not os.access( dir, os.R_OK | os.X_OK ):
+        log.error( "no permissions to access: %s! Terminating..." % dir )
+        sys.exit( 1 )
+    for fd in os.listdir( dir ):
+        full_name = os.path.join( dir, fd )
+        try:
+            file = os.readlink( full_name )
+            if file == file_name:
+                return True
+        except:
+            pass
+    return False
+
+def tail( pid, file_name, seek=0 ):
+    fd = open( file_name )
+    fd.seek( seek )
+    sleep = 0.001
+    buf = ""
+    eof = False
+    while is_file_open( pid, file_name ):
+        while not eof:
+            # while not at EOF (indicated by readline returning "")
+            time.sleep( sleep )
+            buf = buf + fd.readline()
+            if buf == "":
+                eof = True
+                if sleep < 1.0:
+                    sleep += 0.001
+                continue
+            sleep = 0.001
+            # complete Torque lines always end with "\n"
+            if buf[-1] != "\n":#
+                eof = False
+                continue
+            line = buf
+            buf = ""
+            yield line, fd.tell()
+        eof = False
+    fd.close()
+
+def parse_torque_accounting_log( line ):
+    import time
+    line = line.strip()
+    if not line:
+        log.warn( "ignoring empty line" )
+        return None
+    try:
+        # example header: 08/08/2014 11:32:23;S;50438;<payload>
+        comp = line.split( ";", 3 ) 
+        assert comp[1] in TORQUE_LOG_MARKER.keys(), "unknown event: '%s'" % comp[1]
+        timestamp = int( time.mktime( time.strptime( comp[0], "%m/%d/%Y %H:%M:%S" ) ) )     # log (not job) timestamp (time, T)
+        value = TORQUE_LOG_MARKER[comp[1]]                                                  # event type (value, V)
+        name = comp[2].replace( ".", "_" )                                                  # jobid (name, N)
+        payload = comp[3]                                                                   # attribute set
+        host_name = socket.gethostname()                                                    # add local hostname
+        metric = JMetric( name=name, source="Torque", time=timestamp, host=host_name, value=value )
+    except Exception as e:
+        log.warn( "parsing header (%s) failed: %s" % (str( e ), line[0:30]) )
+        return None
+    if not payload:
+        return metric
+    for attr_str in payload.split( " " ):
+        # example payload: user=myuname group=sthaber jobname=STDIN queue=workq ctime=1407490338 qtime=1407490338 etime=1407490338 start=1407490343
+        #     owner=myuname@sb-master exec_host=<exec_host> Resource_List.ncpus=1 Resource_List.neednodes=1:ppn=1:foo:ghz-2.6:mhz-2601:ddr1866:qlogic
+        #     Resource_List.nodect=1 Resource_List.nodes=1:ppn=1:foo:ghz-2.6:mhz-2601:ddr1866:qlogic
+        attr_str = attr_str.replace( ".", "_" )
+        try:
+            k, v = attr_str.split( "=", 1 )
+        except Exception as e:
+            log.warn( "event (%s...), failed to parse attributes: '%s'" % (line[0:30], attr_str) )
+            return None
+        if k in ["ctime", "qtime", "etime", "start", "end"]:
+            #ctime: job creation time
+            #qtime: job was queued
+            #etime: job became eligible to run
+            #start: job start time
+            #end: job ended
+            v = int( v )
+        elif k in ["user", "group", "jobname", "queue", "owner"]:
+            pass
+            # any special treatment here?
+        elif k == "exec_host":
+            # example exec_host: sabi36/19+sabi36/18+sabi36/17+sabi36/16+sabi36/15+sabi36/14+sabi36/13+sabi36/12+sabi36/11...
+            nodes = sorted( list( set( [r.split( "/" )[0] for r in v.split( "+" )] ) ) )
+            k = "cnodes"
+            if conf["include_cpus"]:
+                cpus = {}
+                for n in nodes:
+                    cpus[n] = sorted( list( set( [int( r.split( "/", 2 )[1] ) for r in v.split( "+" ) if r.split( "/", 2 )[0] == n] ) ) )
+                v = cpus
+            else:
+                v = nodes
+        elif k.startswith( "Resource_List" ): 
+            k = k.replace( "Resource_List", "RL" )
+        metric[k] = v
+    return metric
+
+def get_tag( tag_file ):
+    "Read tag file. Cope with old and new format tag file. New format contains a seek offset."
+    tag = None
+    last_pos = None
+    log_file_name = None
+    if os.path.isfile( tag_file ):
+        try:
+            res = open( tag_file ).read().split( " " )
+        except Exception as e:
+            log.debug( "failed to read tag file (%s): %s" % (tag_file, str( e )) )
+        if len(res) == 2:
+            tag = res[0]
+            last_pos = None
+            log_file_name = res[1]
+            log.debug( "tag file (%s) found: %s %s" % (tag_file, tag, log_file_name) )
+        if len(res) == 3:
+            tag = res[0]
+            last_pos = int(res[1])
+            log_file_name = res[2]
+            log.debug( "tag file (%s) found: %s %r %s" % (tag_file, tag, last_pos, log_file_name) )
+    return tag, last_pos, log_file_name
+
+def put_tag( tag_file, tag, last_pos, log_file_name ):
+    open( tag_file, "w" ).write( "%s %d %s" % (tag, last_pos, log_file_name) )
+    log.debug( "wrote tag (%s): %s %d %s" % (tag_file, tag, last_pos, log_file_name) )
+
+def update_job_tasks( metric , objs ):
+    if metric["value"] in ["started", "restarted"]:
+        # "rerun" is not considered here since it is followed by a "started" event
+        for obj in objs:
+            try:
+                obj.addJob( metric )
+            except Exception as e:
+                log.error( "Failed to add job metric to %s: %s" % ( obj.__class__.__name__, str( e )) )
+    elif metric["value"] in ["aborted", "checkpointed", "deleted", "exited"]:
+        for obj in objs:
+            try:
+                obj.removeJob( metric["name"] )
+            except Exception as e:
+                log.error( "Failed to remove job metric of %s: %s" % ( obj.__class__.__name__, str( e )) )
+    else:
+        return    
+
+def finalize_job_tasks( objs ):
+    for obj in objs:
+        if hasattr(obj, "finalize"):
+            obj.finalize()
+
+
+def read_config():
+    conf = {}
+    config = ConfigParser.RawConfigParser( CONFIG_DEFAULTS )
+    config.add_section( "daemon" )
+    config.read( CONF_FILE )
+    conf["log_level"] = config.get( "daemon", "log_level" )
+    conf["to_syslog"] = config.getboolean( "daemon", "to_syslog" )
+    conf["acc_file_dir"] = config.get( "daemon", "acc_file_dir" )
+    conf["tag_file"] = config.get( "daemon", "tag_file" )
+    conf["max_acc_files"] = config.getint( "daemon", "max_acc_files" )
+    conf["mongodb_host"] = config.get( "daemon", "mongodb_host" )
+    conf["mongodb_dbname"] = config.get( "daemon", "mongodb_dbname" )
+    conf["mongodb_uname"] = config.get( "daemon", "mongodb_uname" )
+    conf["mongodb_pw"] = config.get( "daemon", "mongodb_pw" )
+    conf["include_cpus"] = config.getboolean( "daemon", "include_cpus" )
+    conf["create_joblist"] = config.getboolean( "daemon", "create_joblist" )
+    conf["call_tagger"] = config.getboolean( "daemon", "call_tagger" )
+    if conf["call_tagger"]:
+        conf["tagger_cmd"] = config.get("daemon", "tagger_cmd" )
+    return conf
+
+def connect_metric_store( conf, wait=0 ):
+    start = time.time()
+    while time.time() < start + wait + 1:
+        try:
+            store = MongoDBMetricStore( host_name=conf["mongodb_host"],
+                                        username=conf["mongodb_uname"],
+                                        password=conf["mongodb_pw"],
+                                        db_name=conf["mongodb_dbname"] )
+        except Exception as e:
+            log.error( "Failed to connect to MongoDB (%s)!" % str( e ) )
+            store = None
+            if time.time() < start + wait:
+                time.sleep(30)
+    return store
+
+def parse_tail_torque_acc_files(conf):
+    
+    global tag_file, tag_new, acc_log, last_position
+
+    tag_file = conf["tag_file"]
+    tag_new = None
+
+    # import backlog, add all job events to metric store, create cache of currently running jobs
+    cache = JobCache()
+    tag, saved_position, last_log = get_tag( tag_file )
+    tag_found = False
+    file_names = sorted( glob.glob( conf["acc_file_dir"] + "/[0-9]*" ) )
+    file_basenames = map(lambda x: os.path.basename(x), file_names)
+    if last_log and last_log in file_basenames:
+        start = file_basenames.index(last_log)
+    else:
+        start = len( file_names ) - conf["max_acc_files"] if conf["max_acc_files"] >= 0 else 0
+
+    last_file = None
+    last_position = 0
+    for file_name in file_names[start:]:
+        with open( file_name ) as f:
+            acc_log = os.path.basename( file_name )
+            if last_log and acc_log < last_log:
+                continue
+            if last_log and last_log == acc_log and saved_position is not None:
+                f.seek( saved_position )
+                last_position = saved_position
+                tag_found = True
+            log.debug( "importing metrics from: %s" % file_name )
+            for line in f:
+                tag_prev = tag_new
+                tag_new = md5sum( line )
+                if not tag or tag_found:
+                    metric = parse_torque_accounting_log( line )
+                    if metric:
+                        try:
+                            store.addMetric( metric )
+                            log.debug( "stored: %s" % str( metric ) )
+                        except Exception as e:
+                            log.error( "failed to handle backlog metric: %s" % str( e.__class__.__name__ ) )
+                            #
+                            # TODO: handle DB failure: save position in tag file, exit files loop.
+                            #
+                            put_tag( tag_file, tag_prev, last_position, acc_log )
+                            return False
+                        update_job_tasks( metric, [cache] )
+                else:
+                    if tag_new == tag:
+                        tag_found = True
+                last_position = f.tell()
+            last_file = file_name
+    if tag_new:
+        put_tag( tag_file, tag_new, last_position, acc_log )
+        tag_new = None
+    if tag and not tag_found:
+        log.warn( "tag (%s) not found in any considered acc file (%s)!" % (tag, conf["acc_file_dir"]) )
+    
+    # push cache that contains currently running jobs collected from backlog to tagger and mongodb's joblist collection
+    joblist = JobList( conf )
+    tagger = Tagger( conf )
+    for metric in cache.getList():
+        log.debug( "running job from backlog: %s" % str( metric ))
+        update_job_tasks( metric, [tagger, joblist] )
+    #
+    # TODO: when rebuilding the joblist after a failure of the DB we might have missed some
+    #       job starts but could have their finishing marked. This gets marked as early delete.
+    #       Need to clean them up!
+    # Problem: removing early deletes here could leave us with missing true early deletes (where
+    # job gets deleted before the start acc log is written). When this hapens at midnight and
+    # crosses acc log file boundaries, we will miss the early delete if we clean it up!
+    #
+    # A more sane approach could be to reload the joblist from the database before going into the
+    # update loop.
+    #
+    # So: the finalize below is dangerous, somewhat...
+    finalize_job_tasks( [tagger, joblist] )
+    del cache
+    
+    # tail current accounting file
+    while True:
+        pid = torque_pid()
+        file_names = sorted( glob.glob( conf["acc_file_dir"] + "/[0-9]*" ) )
+        if not file_names:
+            log.warn( "no accounting file found in %s, waiting..." % conf["acc_file_dir"] )
+            time.sleep( 30 )
+            continue
+        # not sure the following is necessarilly true. practically yes...
+        file_name = file_names[-1]
+        log.info( "monitoring acc file: %s" % file_name )
+        if file_name == last_file:
+            prev_position = last_position
+        else:
+            prev_position = 0
+        for line, last_position in tail( pid, file_name, seek=prev_position ):
+            acc_log = os.path.basename( file_name )   # placed here due to sudden SIGTERM
+            tag_prev = tag_new
+            tag_new = md5sum( line )
+            metric = parse_torque_accounting_log( line )
+            if metric:
+                try:
+                    store.addMetric( metric )
+                    log.debug( "saved: %s" % str( metric ) )
+                except Exception as e:
+                    log.error( "failed to handle metric: %s" % str( e ) )
+                    #
+                    # handle DB failure: save previous position in tag file, exit files loop.
+                    #
+                    put_tag( tag_file, tag_prev, prev_position, acc_log )
+                    return False
+                
+                update_job_tasks( metric, [tagger, joblist] )
+    return True
+
+
+# main
+if __name__ == "__main__":
+    conf = read_config()
+    
+    # set logging up
+    try:
+        log = logging.getLogger( __name__ )
+        log_level = LOG_LEVELS[conf["log_level"].lower()]
+    except:
+        log_level = config_defaults["log_level"]
+        log.warn( "unknown log level '%s'! Defaults to '%s'." % (log_level, config_defaults["log_level"]) )
+    log.setLevel( log_level )
+    if conf["to_syslog"]:
+        handler = logging.handlers.SysLogHandler( address="/dev/log" )
+    else:
+        handler = logging.StreamHandler()
+    log.addHandler( handler )
+    for k, v in conf.items():
+        log.debug( "conf: %s = %s" % (k, str( v )) )
+    
+    # open database connection
+    store = connect_metric_store( conf )
+    if store is None:
+        log.error("MongoDB not available at start. Terminating.")
+        sys.exit(1)
+
+    # set signal handling up
+    signal.signal(signal.SIGTERM, sig_handler)
+    signal.signal(signal.SIGINT, sig_handler)
+
+    while True:
+        if not parse_tail_torque_acc_files( conf ):
+            store = connect_metric_store( conf, wait=1000000 )
