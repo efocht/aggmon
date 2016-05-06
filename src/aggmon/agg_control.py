@@ -140,7 +140,7 @@ config = {
         "local_cmd"  : "cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &",
         "remote_cmd" : "ssh %(host)s \"cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &\"",
         "remote_kill": "ssh %(host)s kill %(pid)d",
-        "remote_status": "ssh %(host)s \"ps -q %(pid)d -o pid,wchan,cmd,args -ww | tail -1\""
+        "remote_status": "ssh %(host)s \"ps --pid %(pid)d -o pid,wchan,cmd,args -ww | tail -1\""
     }
 }
 
