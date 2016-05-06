@@ -716,8 +716,9 @@ def aggmon_control(argv):
             component_states.kill_components(["collector", "data_store", "job_agg"])
             time.sleep(10)
             component_states.save_state(None, pargs.state_file)
-        rpc.stop()
-        rpc.join()
+            if not pargs.quick:
+                rpc.stop()
+                rpc.join()
         clean_pidfile(pargs.pid_file)
         os._exit(0)
         # not sure why the sys.exit(0) does not work here

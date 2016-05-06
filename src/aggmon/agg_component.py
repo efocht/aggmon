@@ -93,7 +93,11 @@ class ComponentState(object):
         self.timer = RepeatTimer(self.ping_interval, self.send_state_update)
 
     def send_state_update(self):
-        send_rpc(self.zmq_context, self.dispatcher, "set_component_state", **self.state)
+        try:
+            send_rpc(self.zmq_context, self.dispatcher, "set_component_state", **self.state)
+        except RPCNoReplyError as e:
+            log.warning("Server did not reply, ignoring... %r" % e)
+
         
     def update(self, state):
         self.state.update(state)
