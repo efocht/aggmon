@@ -42,13 +42,8 @@ class MsgTagger(object):
                     msg[k] = {"s": v}
 
         tkey = tag_key + ":" + tag_value
-        if tkey in self.tags:
-            self.tags[tkey]["match"].append(msg)
-            self.tags[tkey]["key"] = tag_key
-            self.tags[tkey]["val"] = tag_value
-        else:
-            self.tags[tkey] = {"key": tag_key, "val": tag_value, "match": [msg]}
-        log.info( "Added tag '%s' with topic(s) %r" % (tkey, msg) )
+        self.tags[tkey] = {"key": tag_key, "val": tag_value, "match": [msg]}
+        log.info( "Added tag '%s' : %r" % (tkey, msg) )
         return True
 
     def remove_tag(self, msg, *args, **kwds):
