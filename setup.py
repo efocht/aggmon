@@ -7,7 +7,7 @@ from setuptools import setup, Extension
 CONFIGDIR="/etc/aggmon"
 PREFIX="/usr/local"
 NAME="AggMon"
-VERSION="0.1"
+VERSION="0.2"
 PYVER="%d.%d" % (sys.version_info[0],sys.version_info[1],)
 ARCH=os.uname()[4]
 
