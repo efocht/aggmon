@@ -78,14 +78,19 @@ def conv_from_str(s):
 
 
 class PBSNodes(object):
-    def __init__(self, host="localhost", port=22, user=""):
-        self._host = host
-        self._port = port
-        self._user = user
-        if host != "localhost":
-            self._cmd = "ssh -p %d %s pbsnodes" % (self._port, len(user) > 0 and "%s@%s" % (self._user, self._host) or self._host)
+    def __init__(self, host="localhost", port=22, user="", pull_state_cmd=""):
+        if len(pull_state_cmd) > 0:
+            self._cmd = pull_state_cmd
         else:
-            self._cmd = "pbsnodes"
+            self._host = host
+            self._port = port
+            self._user = user
+            if host != "localhost":
+                self._cmd = "ssh -p %d %s pbsnodes" % (self._port, len(user) > 0
+                                                       and "%s@%s" % (self._user, self._host)
+                                                       or self._host)
+            else:
+                self._cmd = "pbsnodes"
         self._last_update = 0
         self.state = {}
         self.job_nodes = {}

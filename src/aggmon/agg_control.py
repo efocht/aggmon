@@ -133,7 +133,8 @@ config = {
     "resource_manager": {
         "type": "pbs",
         "master": "",
-        "ssh_port": 22
+        "ssh_port": 22,
+        "pull_state_cmd": ""
     },
     "global": {
         "local_cmd"  : "cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &",
@@ -472,7 +473,8 @@ def get_job_list(config):
     from res_mngr import PBSNodes
     # TODO: where do we get host/port from?
     pbs = PBSNodes(host=config["resource_manager"]["master"],
-                   port=config["resource_manager"]["ssh_port"])
+                   port=config["resource_manager"]["ssh_port"],
+                   pull_state_cmd=config["resource_manager"]["pull_state_cmd"])
     pbs.update()
     return pbs.job_nodes
     #return set(pbs.job_nodes.keys())
