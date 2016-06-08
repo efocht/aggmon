@@ -209,8 +209,8 @@ class MongoDBMetricStore(MongoDBStore):
         return self._col_val.insert( metric )
 
 
-    def find_val( self, match=None, proj=None ):
-        return self._col_val.find( match, proj )
+    def find_val( self, match=None, proj=None, sort=None, limit=0 ):
+        return self._col_val.find( match, projection=proj, limit=limit, sort=sort )
 
 
     def drop_all( self ):
@@ -253,9 +253,12 @@ class MongoDBMetricStore(MongoDBStore):
     def current_value( self, metric_name=None, host_name=None ):
         if not isinstance( metric_name, basestring ) or not isinstance( host_name, basestring ):
             return None
-        match = "[{$match: {$and: [{N: \"%s\"}, {H: \"%s\"}]}}, {$sort: {T: -1}}, {$limit: 1}]" % \
-                (metric_name, host_name)
-        return self.find_val( match )
+        match = {"$and": [{"N": metric_name}, {"H": host_name}]}
+        sort = [("T", DESCENDING)]
+        limit = 1
+        #proj = {"V": True, "_id": False}
+        val = self.find_val( match, sort=sort, limit=limit )[0]
+        return val["V"]
 
 
     def percentiles( self, metric_name=None, host_names=None, time_s=None, dmax=(15 * 60)):
