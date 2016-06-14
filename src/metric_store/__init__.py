@@ -1,4 +1,4 @@
 from mongodb_store import *
 
-__all__ = ["MongoDBJobList", "MongoDBMetricStore", "MongoDBJobStore", "MongoDBStatusStore"]
+__all__ = ["MetricStore", "MongoDBJobList", "MongoDBMetricStore", "MongoDBJobStore", "MongoDBStatusStore"]
 

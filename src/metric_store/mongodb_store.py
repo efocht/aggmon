@@ -13,9 +13,11 @@
 import sys
 import time
 import datetime
+import logging
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from bson.code import Code
 from bson.objectid import ObjectId
+from metric_store import MetricStore
 
 __all__ = ["MongoDBMetricStore", "MongoDBJobList", "MongoDBJobStore", "MongoDBStatusStore"]
 
@@ -23,6 +25,8 @@ __all__ = ["MongoDBMetricStore", "MongoDBJobList", "MongoDBJobStore", "MongoDBSt
 MAX_RECORDS = 1500
 METRIC_TTL = 900
 PARTITION_TIMEFRAME = 60 * 60 * 24 * 30
+
+log = logging.getLogger( __name__ )
 
 
 class MongoDBStore(object):
@@ -36,14 +40,18 @@ class MongoDBStore(object):
         "mongodb://vmn1:27017,vmn2:27017"
 
     """
-    def __init__( self, host_name="localhost:27017", port=None, db_name="metric", username="", password="" ):
-        if port and not isinstance( port, int ):
-            port = int( port )
-        self._client = MongoClient( host_name, port )
-        self._db_name = db_name
-        self.db = self._client[db_name]
-        if username and password:
-            self.db.authenticate(username, password, mechanism='MONGODB-CR')
+    def __init__( self, hostname="localhost", port=27017, db_name="metric", username="", password="" ):
+        if not isinstance( port, int ):
+            self.port = int( port )
+        else:
+            self.port = port
+        self.db_name = db_name
+        self.username = username
+        self.password = password
+        self._client = MongoClient( hostname, self.port )
+        self.db = self._client[self.db_name]
+        if self.username and self.password:
+            self.db.authenticate(self.username, self.password, mechanism='MONGODB-CR')
 
     def _update_partition( self, name, partition_timeframe=PARTITION_TIMEFRAME ):
         """
@@ -140,15 +148,15 @@ class MongoDBJobList(MongoDBStore):
         return jobs
 
 
-class MongoDBMetricStore(MongoDBStore):
+class MongoDBMetricStore(MongoDBStore, MetricStore):
     """
     Numerical (Ganglia style) metrics
     Note: In Percona / TokuMX partitioned collections are used.
     """
-    def __init__(self, group="/universe", md_col="metric_md", val_col="metric",
-                 val_ttl=3600*24*180, **kwds):
-        MongoDBStore.__init__( self, **kwds )
-        self._group = group
+    def __init__(self, hostname="localhost", port=27017, db_name="metric", username="", password="", group="/universe",
+                 md_col="metric_md", val_col="metric", val_ttl=3600*24*180, **kwds):
+        MongoDBStore.__init__( self, hostname=hostname, port=port, db_name=db_name, username=username, password=password )
+        self.group = group
         self._col_md = self.get_collection( md_col )
         self._col_md_name = md_col
         self._col_val_base = val_col
@@ -169,7 +177,7 @@ class MongoDBMetricStore(MongoDBStore):
             self._col_val.ensure_index( [("J", ASCENDING)], unique=False )
         except Exception, e:
             raise Exception( "Failed to ensure index: %s" % str( e ) )
-
+        MetricStore.__init__( self )
 
     def update_partitions( self, partition_timeframe=-1, **kwds ):
         """
@@ -195,18 +203,73 @@ class MongoDBMetricStore(MongoDBStore):
         md["_type"] = "MMetric"
         return self._col_md.update( {"hpath": hpath}, {"$set": md}, upsert=True )
 
+    def get_md( self ):
+        return self.find_md( match={"CLUSTER": self.group} )
 
     def find_md( self, match=None, proj=None ):
         return self._col_md.find( match, proj )
 
-
-    def insert_val(self, metric):
+    def insert_val( self, metric ):
         ## EF: we switch to integer values for the time, i.e. second granularity
         ##     the datetime type metric takes up too much space in mongodb.
         ##     Might be that we need to expire old records manually.
         ## make sure the time has proper format such that TTL will expire it eventually
         #metric["T"] = datetime.datetime.fromtimestamp(metric["T"])
         return self._col_val.insert( metric )
+
+    def insert( self, val ):
+        if "SLOPE" in val:
+            # this must be a metadata record coming from gmond/ganglia
+            # is this in cache?
+            _type = self.md_cache.get(val["HOST"], val["NAME"])
+            if _type is not None and _type == val["TYPE"]:
+                log.debug( "skipping MD insert for host=%s, metric=%s" % (val["HOST"], val["NAME"]) )
+                return
+            val["CLUSTER"] = self.group
+            res = self.insert_md(val)
+            log.debug("insert_metadata returned: %r" % res)
+            if "upserted" in res:
+                log.debug( "feeding cache:", val["HOST"], val["NAME"], res["upserted"], val["TYPE"] )
+                self.md_cache.set(val["HOST"], val["NAME"], val["TYPE"])
+            log.debug( "upserted %r" % val )
+        else:
+            # is this in cache?
+            _type = self.md_cache.get(val["H"], val["N"])
+            if _type is None:
+                log.warn( "WARNING: metadata not found for this value record: %r" % val )
+                #
+                # make a metadata entry
+                #
+                v = val["V"]
+                _type = "string"
+                if isinstance(v, int):
+                    _type = "int32"
+                elif isinstance(v, float):
+                    _type = "float"
+                elif isinstance(v, list):
+                    _type = "array"
+                md = {"HOST": val["H"], "NAME": val["N"], "TYPE": _type, "CLUSTER": self.group}
+                res = self.insert_md(md)
+                log.debug("insert_metadata returned: %r" % res)
+                if "upserted" in res:
+                    log.debug( "feeding cache: HOST=%s, NAME=%s, TYPE=%s, %s" % (str( md["HOST"] ), str( md["NAME"] ), str( md["TYPE"] ), str( res["upserted"] )) )
+                    self.md_cache.set(md["HOST"], md["NAME"], md["TYPE"])
+
+            _time = self.v_cache.get(val["H"], val["N"])
+            if _time is not None and _time == val["T"]:
+                log.debug( "skipping V insert for host=%s, metric=%s: duplicate record for time %r" % (val["H"], val["N"], val["T"]) )
+                return
+
+            #string|int8|uint8|int16|uint16|int32|uint32|float|double
+            if _type in ("int8", "uint8", "int16", "uint16", "int32", "uint32"):
+                if not isinstance(val["V"], int):
+                    val["V"] = int(val["V"])
+            elif _type in ("float", "double"):
+                if not isinstance(val["V"], float):
+                    val["V"] = float(val["V"])
+            res = self.insert_val(val)
+            log.debug( "inserted %r" % val )
+            self.v_cache.set(val["H"], val["N"], val["T"])
 
 
     def find_val( self, match=None, proj=None, sort=None, limit=0 ):

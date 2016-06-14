@@ -6,7 +6,6 @@ import os
 import sys
 import re
 import pdb
-from pymongo import MongoClient, ASCENDING
 import threading
 import time
 try:
@@ -17,13 +16,12 @@ import zmq
 from Queue import Queue, Empty
 from agg_component import get_kwds, ComponentState
 from agg_rpc import *
-from agg_mcache import MCache
 # Path Fix
 sys.path.append(
     os.path.abspath(
         os.path.join(
             os.path.dirname(__file__), "../")))
-from metric_store.mongodb_store import *
+from metric_store.mongodb_store import MongoDBMetricStore
 
 
 log = logging.getLogger( __name__ )
@@ -37,30 +35,18 @@ class DataStore(threading.Thread):
         self.group = group
         self.coll_prefix = coll_prefix
         self.value_metrics_ttl = value_metrics_ttl
-        self.store = MongoDBMetricStore(host_name=hostname, port=port, db_name=db_name,
+        self.store = MongoDBMetricStore(hostname=hostname, port=port, db_name=db_name,
                                         username=username, password=password, group=group)
         if self.store is None:
-            raise Exception("Could not connect to Mongo DB")
-        self.md_cache = MCache()
-        self.v_cache = MCache()
-        self.load_md_cache()
+            raise Exception("Could not connect to DB")
         self.stopping = False
-        threading.Thread.__init__(self, name="mongo_store")
+        threading.Thread.__init__(self, name="data_store")
         self.daemon = True
 
     def run(self):
         log.info( "[Started DataStore Thread]" )
         self.req_worker()
 
-    def load_md_cache(self):
-        log.info("loading md cache ...")
-        for d in self.store.find_md( match={"CLUSTER": self.group} ):
-            self.md_cache.set(d["HOST"], d["NAME"], d["TYPE"])
-
-    def show_md_cache(self):
-        for k, v in self.md_cache.items():
-            print("%s: %s" % (k, v))
-    
     def req_worker(self):
         while not self.stopping:
             try:
@@ -76,62 +62,10 @@ class DataStore(threading.Thread):
                 #
                 # do the work
                 #
-                log.debug("mongo_store: val = %r" % val)
-                if "SLOPE" in val:
-                    # this must be a metadata record coming from gmond/ganglia
-                    # is this in cache?
-                    _type = self.md_cache.get(val["HOST"], val["NAME"])
-                    if _type is not None and _type == val["TYPE"]:
-                        log.debug( "skipping MD insert for host=%s, metric=%s" % (val["HOST"], val["NAME"]) )
-                        continue
-                    val["CLUSTER"] = self.group
-                    res = self.store.insert_md(val)
-                    log.debug("insert_metadata returned: %r" % res)
-                    if "upserted" in res:
-                        log.debug( "feeding cache:", val["HOST"], val["NAME"], res["upserted"], val["TYPE"] )
-                        self.md_cache.set(val["HOST"], val["NAME"], val["TYPE"])
-                    log.debug( "upserted %r" % val )
-                else:
-                    # is this in cache?
-                    _type = self.md_cache.get(val["H"], val["N"])
-                    if _type is None:
-                        log.error( "WARNING: metadata not found for this value record: %r" % val )
-                        #
-                        # make a metadata entry
-                        #
-                        v = val["V"]
-                        _type = "string"
-                        if isinstance(v, int):
-                            _type = "int32"
-                        elif isinstance(v, float):
-                            _type = "float"
-                        elif isinstance(v, list):
-                            _type = "array"
-                        md = {"HOST": val["H"], "NAME": val["N"], "TYPE": _type, "CLUSTER": self.group}
-                        res = self.store.insert_md(md)
-                        log.debug("insert_metadata returned: %r" % res)
-                        if "upserted" in res:
-                            log.debug( "feeding cache:", md["HOST"], md["NAME"], res["upserted"], md["TYPE"] )
-                            self.md_cache.set(md["HOST"], md["NAME"], md["TYPE"])
-
-                    _time = self.v_cache.get(val["H"], val["N"])
-                    if _time is not None and _time == val["T"]:
-                        log.debug( "skipping V insert for host=%s, metric=%s: duplicate record for time %r" % (val["H"], val["N"], val["T"]) )
-                        continue
-
-                    #string|int8|uint8|int16|uint16|int32|uint32|float|double
-                    if _type in ("int8", "uint8", "int16", "uint16", "int32", "uint32"):
-                        if not isinstance(val["V"], int):
-                            val["V"] = int(val["V"])
-                    elif _type in ("float", "double"):
-                        if not isinstance(val["V"], float):
-                            val["V"] = float(val["V"])
-                    res = self.store.insert_val(val)
-                    log.debug( "inserted %r" % val )
-                    self.v_cache.set(val["H"], val["N"], val["T"])
+                log.debug("data_store: val = %r" % val)
+                self.store.insert(val)
             except Exception as e:
                 log.error( "Exception in data_store req worker: %r, %r" % (e, val) )
-
             self.queue.task_done()
 
 
@@ -143,7 +77,7 @@ def aggmon_data_store(argv):
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5511", action="store", help="RPC command port")
     ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
     ap.add_argument('-e', '--expire', default=180, action="store", help="days for expiring value metrics")
-    ap.add_argument('-H', '--host', default="localhost:27017", action="store", help="MongoDB host:port")
+    ap.add_argument('-H', '--host', default="localhost:27017", action="store", help="data store host:port")
     ap.add_argument('-d', '--dbname', default="metricdb", action="store", help="database name")
     ap.add_argument('-P', '--prefix', default="gmetric", action="store", help="collections prefix")
     ap.add_argument('-u', '--user', default="", action="store", help="user name")
@@ -160,12 +94,11 @@ def aggmon_data_store(argv):
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
 
-    # open mongo/toku DB
-    mongo_host, mongo_port = pargs.host.split(":")
-    mongo_port = int(mongo_port)
+    # open DB
+    data_store_host, data_store_port = pargs.host.split(":")
 
     try:
-        store = DataStore(mongo_host, mongo_port, pargs.dbname, pargs.user, pargs.passwd,
+        store = DataStore(data_store_host, int(data_store_port), pargs.dbname, pargs.user, pargs.passwd,
                            pargs.group, coll_prefix=pargs.prefix, value_metrics_ttl=pargs.expire*24*3600)
     except Exception as e:
         log.error("Failed to create DataStore: %r" % e)
@@ -217,7 +150,7 @@ def aggmon_data_store(argv):
     while True:
         try:
             s = receiver.recv()
-            #log.info("received msg on PULL port: %r" % s)
+            log.info("received msg on PULL port: %r" % s)
             msg = json.loads(s)
 
             cmd = None
@@ -227,7 +160,7 @@ def aggmon_data_store(argv):
 
             if cmd is not None:
                 if cmd["cmd"] == "quit":
-                    log.info( "Stopping mongo_store on 'quit' command.")
+                    log.info( "Stopping data_store on 'quit' command.")
                     # raw exit!!!
                     os._exit(0)
                     break
@@ -242,7 +175,8 @@ def aggmon_data_store(argv):
                 tstart = time.time()
                 count = 0
             count += 1
-            component.update({"stats.msgs_recvd": count})
+            if component is not None:
+                component.update({"stats.msgs_recvd": count})
             if (pargs.stats and count % 10000 == 0) or \
                (cmd is not None and cmd["cmd"] == "show-stats"):
                 tend = time.time()
@@ -256,4 +190,4 @@ def aggmon_data_store(argv):
 
 
 if __name__ == "__main__":
-    aggmon_data_store(sys.argv)
+    aggmon_data_store(sys.argv[1:])
