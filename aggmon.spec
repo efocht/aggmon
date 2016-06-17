@@ -27,8 +27,12 @@ rm -rf %{buildroot}
 install -m 755 -d %{buildroot}%{_bindir}
 install -m 755 -d %{buildroot}/%{python_sitelib}/metric_store
 install -m 755 -d %{buildroot}/%{python_sitelib}/aggmon
+install -m 644 src/metric_store/metric_store.py %{buildroot}/%{python_sitelib}/metric_store/
+install -m 644 src/metric_store/metric_store.pyc %{buildroot}/%{python_sitelib}/metric_store/
 install -m 644 src/metric_store/mongodb_store.py %{buildroot}/%{python_sitelib}/metric_store/
 install -m 644 src/metric_store/mongodb_store.pyc %{buildroot}/%{python_sitelib}/metric_store/
+install -m 644 src/metric_store/influxdb_store.py %{buildroot}/%{python_sitelib}/metric_store/
+install -m 644 src/metric_store/influxdb_store.pyc %{buildroot}/%{python_sitelib}/metric_store/
 install -m 644 src/metric_store/__init__.py %{buildroot}/%{python_sitelib}/metric_store/
 install -m 644 src/metric_store/__init__.pyc %{buildroot}/%{python_sitelib}/metric_store/
 install -m 644 src/aggmon/module-quantiles/quantiles.so %{buildroot}/%{python_sitelib}/aggmon/
@@ -51,22 +55,21 @@ rm -rf %{buildroot}
 
 
 %package -n metric-store
-Summary: MongoDB abstraction layer
+Summary: MetricStore abstraction layer
 Requires: python pymongo
 BuildArch: noarch
 
 %description -n metric-store
-Helper classes to store metrics and job data in a MongoDB database.
+Helper classes to store metrics and job data in a database (MongoDB/TokuMX or InfluxDB).
 
 %files -n metric-store
 %defattr(-, root, root)
 %{python_sitelib}/metric_store/*
 
 
-%description -n metric-store
-Helper classes to store metrics and job data in a MongoDB database.
-
 %changelog
+* Fri Jun 17 2016 NEC AJ
+- added influxdb store 
 * Thu Dec 17 2015 NEC AJ 
 - added aggmon package (yet containing qunatiles module only)
 * Thu Jul 16 2015 NEC AJ
