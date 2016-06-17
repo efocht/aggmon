@@ -40,11 +40,11 @@ class MongoDBStore(object):
         "mongodb://vmn1:27017,vmn2:27017"
 
     """
-    def __init__( self, hostname="localhost", port=27017, db_name="metric", username="", password="" ):
-        if not isinstance( port, int ):
+    def __init__( self, hostname="localhost", port=None, db_name="metric", username="", password="" ):
+        if port and ( isinstance( port, int ) or isinstance( port, basestring ) ):
             self.port = int( port )
         else:
-            self.port = port
+            self.port = 27017
         self.db_name = db_name
         self.username = username
         self.password = password
@@ -111,11 +111,6 @@ class MongoDBStore(object):
         self._client.fsync()
         self._client.close()
 
-    @staticmethod
-    def group_suffix( group ):
-        suffix = group.lstrip("/").replace("/", "_")
-        return suffix
-
 
 class MongoDBJobList(MongoDBStore):
     """
@@ -160,7 +155,7 @@ class MongoDBMetricStore(MongoDBStore, MetricStore):
         self._col_md = self.get_collection( md_col )
         self._col_md_name = md_col
         self._col_val_base = val_col
-        self._col_val_name = val_col + "_" + MongoDBStore.group_suffix( group )
+        self._col_val_name = val_col + "_" + MetricStore.group_suffix( group )
         self._col_val = self.get_collection( self._col_val_name, "{partitioned: true, primaryKey: {T: 1, _id: 1}}" )
         self._val_ttl = val_ttl
         try:
@@ -390,7 +385,7 @@ class MongoDBJobStore(MongoDBStore):
         MongoDBStore.__init__( self, **kwds )
         self._group = group
         self._col_base = col
-        self._col_name = col + "_" + MongoDBMetricStore.group_suffix( group )
+        self._col_name = col + "_" + MetricStore.group_suffix( group )
         self._col = self.get_collection( self._col_name )
         self._col_ttl = val_ttl
         try:
@@ -429,7 +424,7 @@ class MongoDBStatusStore(MongoDBStore):
         MongoDBStore.__init__( self, **kwds )
         self._group = group
         self._col_base = col
-        self._col_name = col + "_" + MongoDBMetricStore.group_suffix( group )
+        self._col_name = col + "_" + MetricStore.group_suffix( group )
         self._col = self.get_collection( self._col_name )
         self._col_ttl = val_ttl
         try:

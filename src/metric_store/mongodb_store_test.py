@@ -1,8 +1,17 @@
+import sys
+import os
 import time
 import datetime
-from metric_store.mongodb_store import *
-from bson.objectid import ObjectId
 import pdb
+
+# Path Fix
+sys.path.append(
+    os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__), "../aggmon")))
+
+from mongodb_store import *
+from bson.objectid import ObjectId
 
 # delete all collections in MongoDBMetricStore
 MongoDBMetricStore( db_name="metric_test" ).drop_all()

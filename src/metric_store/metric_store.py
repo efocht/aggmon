@@ -28,3 +28,8 @@ class MetricStore:
     def get_md(self):
         raise NotImplementedError("Must implement method in derived class!")
 
+    @staticmethod
+    def group_suffix( group ):
+        suffix = group.lstrip("/").replace("/", "_")
+        return suffix
+

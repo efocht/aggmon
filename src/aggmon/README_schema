@@ -1,8 +1,9 @@
-The data stored by aggmon in TokuMX/MongoDB is organized as follows:
+The data stored by aggmon depends on the type of the DB used ans organized as follows.
 
 
-Database name: metricdb
-=======================
+Database MongoDB / TokuMX
+=========================
+name: metricdb
 
 Collection: metric_md
 ---------------------
@@ -32,3 +33,19 @@ Collection: metric_<group_name>
 
 This collection contains the metric value records.
 
+
+
+Database InfluxDB
+=================
+name: metricdb_<group_name>
+
+Data records
+------------
+
+load_one,host=node01,collector=aggmon value=14 1466163282000000000
+load_one,host=node02,collector=aggmon value=65 1466163266000000000
+
+
+Note: InfluxDB does not have something similar to collections.
+There is no persistent metadata storeag yet. If required metadata
+could go into a separate database named e.g. metricdb_md.

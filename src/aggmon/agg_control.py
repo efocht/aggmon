@@ -23,7 +23,7 @@ sys.path.append(
         os.path.join(
             os.path.dirname(
                 os.path.realpath(__file__)), "../")))
-from metric_store.mongodb_store import *
+#from metric_store.mongodb_store import *
 
 
 log = logging.getLogger( __name__ )
@@ -72,7 +72,7 @@ scheduler = None
 # ZeroMQ context (global)
 zmq_context = None
 
-# list of running jobs, as fresh as the mongodb collection
+# list of running jobs, as fresh as the db collection
 job_list = {}
 
 # controls main program loop
@@ -149,7 +149,7 @@ config = {
 # metric : metric that should be aggregated
 # agg_metric : aggregated metric name
 # push_target : where to push the aggregated metric to. Can be the agg_collector
-#               of the own group or one on a higher level or the mongo store.
+#               of the own group or one on a higher level or the data store.
 # agg_type : aggregation type, i.e. min, max, avg, sum, worst, quant10
 # ttl : (optional) time to live for metrics, should filter out old/expired metrics
 # args ... : space for further aggregator specific arguments

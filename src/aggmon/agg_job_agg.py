@@ -5,7 +5,7 @@ import logging
 import sys
 import re
 import pdb
-from pymongo import MongoClient, ASCENDING
+#from pymongo import MongoClient, ASCENDING
 import threading
 import time
 import ujson
@@ -37,7 +37,7 @@ Arguments:
  metric : metric that should be aggregated
  agg_metric : aggregated metric name
  push_target : where to push the aggregated metric to. Can be the agg_pub_sub
-               of the own group or one on a higher level or the mongo store.
+               of the own group or one on a higher level or the data store.
  agg_type : aggregation type, i.e. min, max, avg, sum, worst, quant10
  ttl : (optional) time to live for metrics, should filter out old/expired metrics
  args ... : space for further aggregator specific arguments

@@ -22,6 +22,7 @@ sys.path.append(
         os.path.join(
             os.path.dirname(__file__), "../")))
 from metric_store.mongodb_store import MongoDBMetricStore
+#from metric_store.influxdb_store import InfluxDBMetricStore
 
 
 log = logging.getLogger( __name__ )
@@ -35,8 +36,8 @@ class DataStore(threading.Thread):
         self.group = group
         self.coll_prefix = coll_prefix
         self.value_metrics_ttl = value_metrics_ttl
-        self.store = MongoDBMetricStore(hostname=hostname, port=port, db_name=db_name,
-                                        username=username, password=password, group=group)
+        self.store = MongoDBMetricStore(hostname=hostname, port=port, db_name=db_name, username=username, password=password, group=group)
+        #self.store = InfluxDBMetricStore(hostname=hostname, port=port, db_name=db_name, username=username, password=password, group=group)
         if self.store is None:
             raise Exception("Could not connect to DB")
         self.stopping = False
@@ -77,7 +78,8 @@ def aggmon_data_store(argv):
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5511", action="store", help="RPC command port")
     ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
     ap.add_argument('-e', '--expire', default=180, action="store", help="days for expiring value metrics")
-    ap.add_argument('-H', '--host', default="localhost:27017", action="store", help="data store host:port")
+    ap.add_argument('-H', '--host', default="localhost", action="store", help="data store host")
+    ap.add_argument('-n', '--port', default=None, action="store", help="data store port")
     ap.add_argument('-d', '--dbname', default="metricdb", action="store", help="database name")
     ap.add_argument('-P', '--prefix', default="gmetric", action="store", help="collections prefix")
     ap.add_argument('-u', '--user', default="", action="store", help="user name")
@@ -95,10 +97,8 @@ def aggmon_data_store(argv):
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
 
     # open DB
-    data_store_host, data_store_port = pargs.host.split(":")
-
     try:
-        store = DataStore(data_store_host, int(data_store_port), pargs.dbname, pargs.user, pargs.passwd,
+        store = DataStore(pargs.host, pargs.port, pargs.dbname, pargs.user, pargs.passwd,
                            pargs.group, coll_prefix=pargs.prefix, value_metrics_ttl=pargs.expire*24*3600)
     except Exception as e:
         log.error("Failed to create DataStore: %r" % e)
