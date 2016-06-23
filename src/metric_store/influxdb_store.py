@@ -136,26 +136,6 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
     def get_md(self):
         return None
 
-    def read_tags(self):
-        tags = {}
-        if os.path.exists(self.tagfile):
-            finput = None
-            try:
-                f = open(self.tagfile)
-                finput = f.read().strip()
-                f.close()
-            except:
-                return tags
-            for line in finput.split("\n"):
-                if line.startswith("#") or not line.strip():
-                    continue
-                if not ":" in line:
-                    continue
-                linelist = [ i.strip() for i in line.split(":") ]
-                if len(linelist):
-                    tags.update({linelist[0] : linelist[1]})
-        return tags
-
     def insert(self, metric):
         """
         Add metric to batch, send batch if sufficient data is available or batch timed out
@@ -181,8 +161,6 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
             # build metrics data
             metrics = []
             tags ={}
-            if self.addtags:
-                tags.update(self.read_tags())
             for path in self.batch.keys():
                 pathlist = path.split(".")
                 if len(pathlist) >= 4:
