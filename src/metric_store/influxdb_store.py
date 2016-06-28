@@ -162,6 +162,7 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
             metrics = []
             tags ={}
             for path in self.batch.keys():
+                # ex. path: server.node6.likwid.cpu1.dpmflops
                 pathlist = path.split(".")
                 if len(pathlist) >= 4:
                     pathlist.pop(0)
@@ -216,5 +217,5 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
         """
         host = metric["HOST"] if "HOST" in metric else metric["H"]
         name = metric["NAME"] if "NAME" in metric else metric["N"]
-        return "server." + host + ".aggmon." + name
+        return "server." + host + "." + name
 

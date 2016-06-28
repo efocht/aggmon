@@ -59,9 +59,13 @@ if __name__ == "__main__":
     context = zmq.Context()
     epoch = int(time.time()) - 100
     random.seed(epoch)
-    for n in xrange(10):
-        data = {"N": "load_one", "H": "node01", "V": random.randint(0, 99), "T": epoch + n}
+    for n in xrange(9):
+        data = {"N": "likwid.cpu1.dpmflops", "H": "node" + str(n), "V": random.randint(0, 99), "T": epoch + n}
         send_agg_data(context, "tcp://127.0.0.1:5550", data)    
-        data = {"N": "load_one", "H": "node02", "V": random.randint(0, 99), "T": epoch + n}
+        data = {"N": "cpu.total.user", "H": "node" + str(n), "V": random.randint(0, 99), "T": epoch + n}
+        send_agg_data(context, "tcp://127.0.0.1:5550", data)    
+        data = {"N": "cpu.cpu1.nice", "H": "node" + str(n), "V": random.randint(0, 99), "T": epoch + n}
+        send_agg_data(context, "tcp://127.0.0.1:5550", data)    
+        data = {"N": "memory.SwapTotal", "H": "node" + str(n), "V": random.randint(0, 99), "T": epoch + n}
         send_agg_data(context, "tcp://127.0.0.1:5550", data)    
 
