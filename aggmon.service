@@ -22,6 +22,6 @@ ExecStop=/usr/local/sbin/agg_control -c ${agg_configdir} \
                                      --state-file ${agg_statefile} \
                                      --pid-file ${agg_pidfile} \
                                      --kill
-ExecStopPost=/bin/kill < "${agg_pidfile}"
+ExecStopPost=/bin/bash -c 'test -f ${agg_pidfile} && ps -p `cat ${agg_pidfile}` && kill `cat ${agg_pidfile}`;rm -f ${agg_pidfile}'
 [Install]
 WantedBy=multi-user.target

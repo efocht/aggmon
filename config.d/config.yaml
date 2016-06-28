@@ -19,10 +19,12 @@ config:
             logfile: /tmp/%(service)s_%(jobid)s.log
     database:
         dbname: metricdb
-        dbhost: localhost:27017
+        dbhost: ""
         user: ""
         password: ""
     global:
         local_cmd:   cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &
         remote_cmd:  'ssh %(host)s "cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &"'
         remote_kill: ssh %(host)s kill %(pid)d
+    resource_manager:
+        master: localhost

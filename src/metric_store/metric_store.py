@@ -1,5 +1,8 @@
 import logging
-from agg_mcache import MCache
+try:
+    from agg_mcache import MCache
+except:
+    from aggmon.agg_mcache import MCache
 
 log = logging.getLogger( __name__ )
 
