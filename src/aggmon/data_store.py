@@ -22,7 +22,7 @@ sys.path.append(
         os.path.join(
             os.path.dirname(__file__), "../")))
 from metric_store.mongodb_store import MongoDBMetricStore
-#from metric_store.influxdb_store import InfluxDBMetricStore
+from metric_store.influxdb_store import InfluxDBMetricStore
 
 
 log = logging.getLogger( __name__ )
