@@ -37,21 +37,20 @@ class InfluxDBStore(object):
         elif self.username:
             self.url += "%s@" % self.username
         self.url += "%s:%s" % (self.hostname, self.port)
-        self.curl_post = "curl -XPOST -is %s/query" % self.url
-        self.curl_get = "curl -GET  -s %s/query" % self.url
-        self.curl_write = "curl -XPOST -is %s/write" % self.url
+        self.curl_get = "curl --get -is %s/query" % self.url
+        self.curl_write = "curl -is %s/write" % self.url
 
     def create_db( self, ext_name="" ):
         """
-        curl -XPOST -i http://localhost:8086/query --data-urlencode "q=CREATE DATABASE metric_universe"
+        curl --get -i http://localhost:8086/query --data-urlencode "q=CREATE DATABASE metric_universe"
         """
         sql_cmd = "'q=CREATE DATABASE %s'" % (self.db_name + ext_name)
-	curl_cmd = self.curl_post + " --data-urlencode " + sql_cmd
+	curl_cmd = self.curl_get + " --data-urlencode " + sql_cmd
         return self.exec_cmd( curl_cmd )
 
     def query( self, query, ext_name="" ):
         """
-        curl -XGET  -i http://localhost:8086/query? \
+        curl --get -i http://localhost:8086/query? \
                                      --data-urlencode 'db=metric-universe' \
                                      --data-urlencode 'q=SELECT value FROM load_one'
         """
@@ -61,7 +60,7 @@ class InfluxDBStore(object):
 
     def write( self, data, ext_name="" ):
         """
-        curl -XPOST -i http://localhost:8086/write?db=metric_universe --data-binary 'cpu_load_short,host=server01,region=us-west value=0.64 1434055562000000000'
+        curl -i http://localhost:8086/write?db=metric_universe --data-binary 'cpu_load_short,host=server01,region=us-west value=0.64 1434055562000000000'
         """
 	curl_cmd = self.curl_write + "?db=" + self.db_name + ext_name + " --data-binary "
 
@@ -82,11 +81,11 @@ class InfluxDBStore(object):
     def drop_all( self, ext_name="" ):
         """
         Drops all content; not the database itself.
-        curl -XPOST -i http://localhost:8086/query --data-urlencode "q=DROP DATABASE IF EXISTS metric_universe;CREATE DATABASE metric_universe"
+        curl -i http://localhost:8086/query --data-urlencode "q=DROP DATABASE IF EXISTS metric_universe;CREATE DATABASE metric_universe"
         """
         db_name = self.db_name + ext_name
         sql_cmd = "'q=DROP DATABASE IF EXISTS %s;CREATE DATABASE %s'" % (db_name, db_name)
-	curl_cmd = self.curl_post + " --data-urlencode " + sql_cmd
+	curl_cmd = self.curl_get + " --data-urlencode " + sql_cmd
         return self.exec_cmd( curl_cmd )
 
     @staticmethod
@@ -212,10 +211,12 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
     @staticmethod
     def to_path( metric ):
         """
-        path is: <"server"|"instance">.$hostname.$collectorname.$metricname
+        path is: <"servers"|"instance">.$hostname.$collectorname.$metricname
                  e.g. servers.host.cpu.total.idle
         """
         host = metric["HOST"] if "HOST" in metric else metric["H"]
         name = metric["NAME"] if "NAME" in metric else metric["N"]
-        return "server." + host + "." + name
+        if name.split(".")[0] == "servers":
+            return name
+        return "servers." + host + "." + name
 
