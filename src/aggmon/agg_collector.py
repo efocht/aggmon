@@ -186,7 +186,8 @@ class AggPubThread(threading.Thread, AggPubMatch):
                     tstart = time.time()
                     bstart = tstart
                 count += 1
-                component.update({"stats.msgs_published": count})
+                if component is not None:
+                    component.update({"stats.msgs_published": count})
                 if count % 10000 == 0:
                     tend = time.time()
                     sys.stdout.write("published %d msgs in %f seconds, %f msg/s\n" %
@@ -238,7 +239,8 @@ class SubscriberQueue(threading.Thread):
                 if count == 0:
                     tstart = time.time()
                 count += 1
-                component.update({"stats.msgs_recvd": count})
+                if component is not None:
+                    component.update({"stats.msgs_recvd": count})
                 if count % 10000 == 0 or "PRINT" in msg:
                 #if count % 10 == 0 or "PRINT" in msg:
                     tend = time.time()
@@ -249,7 +251,8 @@ class SubscriberQueue(threading.Thread):
                     sys.stdout.flush()
             except Exception as e:
                 log.error("Exception in msg receiver: %r" % e)
-                break
+                # if something breaks, continue anyway
+                #break
         log.info("%d messages received" % count)
 
 
