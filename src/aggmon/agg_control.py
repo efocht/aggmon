@@ -362,7 +362,7 @@ def cmd_to_collectors(context, cmd, msg, restrict=None):
         try:
             result[cmd_port] = send_rpc(context, cmd_port, cmd, **msg)
         except RPCNoReplyError as e:
-            log.warning("$r" % e)
+            log.warning("%r" % e)
             failed[cmd_port] = True
     return (result, failed,)
 
