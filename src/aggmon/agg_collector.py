@@ -333,8 +333,10 @@ def aggmon_collector(argv):
     state = []
     subs = {}
     tags = {}
-    if len(pargs.state_file) > 0:
-        state = load_state(pargs.state_file)
+
+    # EF 6.7.16 disabled state loading
+    #if len(pargs.state_file) > 0:
+    #    state = load_state(pargs.state_file)
     if len(state) >= 2:
         subs = state[0]
         tags = state[1]
@@ -369,7 +371,9 @@ def aggmon_collector(argv):
         return msg
 
     def save_subs_tags(msg):
-        save_state(pargs.state_file, [pubsub.subs, tagger.tags])
+        # EF 6.7.16 disabled state saving
+        #save_state(pargs.state_file, [pubsub.subs, tagger.tags])
+        pass
 
     def quit(msg):
         subq.stopping = True
