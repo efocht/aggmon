@@ -14,8 +14,8 @@ from metric_store import MetricStore
 
 __all__ = ["InfluxDBMetricStore"]
 
-BATCH_SIZE = 1 
-CACHE_SIZE = 20000
+BATCH_SIZE = 96
+CACHE_SIZE = 1024
 TIME_PRECISION = "s"
 TAGFILE = ""
 
@@ -45,7 +45,7 @@ class InfluxDBStore(object):
         curl --get -i http://localhost:8086/query --data-urlencode "q=CREATE DATABASE metric_universe"
         """
         sql_cmd = "'q=CREATE DATABASE %s'" % (self.db_name + ext_name)
-	curl_cmd = self.curl_get + " --data-urlencode " + sql_cmd
+        curl_cmd = self.curl_get + " --data-urlencode " + sql_cmd
         return self.exec_cmd( curl_cmd )
 
     def query( self, query, ext_name="" ):
@@ -55,14 +55,14 @@ class InfluxDBStore(object):
                                      --data-urlencode 'q=SELECT value FROM load_one'
         """
         sql_cmd = "q=%s" % query
-	curl_cmd = self.curl_get + "?" + " --data-urlencode 'db=" + self.db_name + ext_name + "' --data-urlencode '" + sql_cmd + "'"
+        curl_cmd = self.curl_get + "?" + " --data-urlencode 'db=" + self.db_name + ext_name + "' --data-urlencode '" + sql_cmd + "'"
         return self.exec_cmd( curl_cmd )
 
     def write( self, data, ext_name="" ):
         """
         curl -i http://localhost:8086/write?db=metric_universe --data-binary 'cpu_load_short,host=server01,region=us-west value=0.64 1434055562000000000'
         """
-	curl_cmd = self.curl_write + "?db=" + self.db_name + ext_name + " --data-binary "
+        curl_cmd = self.curl_write + "?db=" + self.db_name + ext_name + " --data-binary "
 
         sendlist = []
         for m in data:
@@ -85,7 +85,7 @@ class InfluxDBStore(object):
         """
         db_name = self.db_name + ext_name
         sql_cmd = "'q=DROP DATABASE IF EXISTS %s;CREATE DATABASE %s'" % (db_name, db_name)
-	curl_cmd = self.curl_get + " --data-urlencode " + sql_cmd
+        curl_cmd = self.curl_get + " --data-urlencode " + sql_cmd
         return self.exec_cmd( curl_cmd )
 
     @staticmethod
@@ -148,7 +148,7 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
             v = metric["VALUE"] if "VALUE" in metric else metric["V"]
             self.batch[path].append([t, v])
             self.batch_count += 1
-        if self.batch_count >= self.batch_size and (time.time() - self.batch_timestamp) > 2**self.time_multiplier:
+        if self.batch_count >= self.batch_size or (time.time() - self.batch_timestamp) > 2**self.time_multiplier:
             self.batch_timestamp = time.time()
             self.send_batch()
 
