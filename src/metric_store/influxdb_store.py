@@ -5,6 +5,7 @@ Patched by Thomas Roehl (Thomas.Roehl@fau.de) for the FEPA project to add
 collector and metric tags to the json.
 """
 import time
+import logging
 import math
 import os, os.path
 import re, subprocess
@@ -19,6 +20,7 @@ CACHE_SIZE = 1024
 TIME_PRECISION = "s"
 TAGFILE = ""
 
+log = logging.getLogger( __name__ )
 
 class InfluxDBStore(object):
     def __init__( self, hostname="localhost", port=None, db_name="metric", username="root", password="root" ):
@@ -45,7 +47,7 @@ class InfluxDBStore(object):
         curl --get -i http://localhost:8086/query --data-urlencode "q=CREATE DATABASE metric_universe"
         """
         sql_cmd = "'q=CREATE DATABASE %s'" % (self.db_name + ext_name)
-        curl_cmd = self.curl_get + " --data-urlencode " + sql_cmd
+	curl_cmd = self.curl_get + " --data-urlencode " + sql_cmd
         return self.exec_cmd( curl_cmd )
 
     def query( self, query, ext_name="" ):
@@ -55,14 +57,14 @@ class InfluxDBStore(object):
                                      --data-urlencode 'q=SELECT value FROM load_one'
         """
         sql_cmd = "q=%s" % query
-        curl_cmd = self.curl_get + "?" + " --data-urlencode 'db=" + self.db_name + ext_name + "' --data-urlencode '" + sql_cmd + "'"
+	curl_cmd = self.curl_get + "?" + " --data-urlencode 'db=" + self.db_name + ext_name + "' --data-urlencode '" + sql_cmd + "'"
         return self.exec_cmd( curl_cmd )
 
     def write( self, data, ext_name="" ):
         """
         curl -i http://localhost:8086/write?db=metric_universe --data-binary 'cpu_load_short,host=server01,region=us-west value=0.64 1434055562000000000'
         """
-        curl_cmd = self.curl_write + "?db=" + self.db_name + ext_name + " --data-binary "
+	curl_cmd = self.curl_write + "?db=" + self.db_name + ext_name + " --data-binary "
 
         sendlist = []
         for m in data:
@@ -85,18 +87,18 @@ class InfluxDBStore(object):
         """
         db_name = self.db_name + ext_name
         sql_cmd = "'q=DROP DATABASE IF EXISTS %s;CREATE DATABASE %s'" % (db_name, db_name)
-        curl_cmd = self.curl_get + " --data-urlencode " + sql_cmd
+	curl_cmd = self.curl_get + " --data-urlencode " + sql_cmd
         return self.exec_cmd( curl_cmd )
 
     @staticmethod
     def exec_cmd( cmd ):
         proc = subprocess.Popen( cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE )
         o, e = proc.communicate() #return (stdout, stdierr)
-        #p = "### send:\n" + cmd + "\n"
-        #p += "### stdout:\n" + o if o else ""
-        #p += "### stderr:\n" + e if e else ""
-        #p += "\n"
-        #print p
+        p = "### send:\n" + cmd + "\n"
+        p += "### stdout:\n" + o if o else ""
+        p += "### stderr:\n" + e if e else ""
+        p += "\n"
+        log.debug(p)
         return o, e
 
 
@@ -144,6 +146,7 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
         if self.batch_count <= self.metric_max_cache:
             if not self.batch.has_key(path):
                 self.batch[path] = []
+                #log.error("New key in batch: %s" % str(path))
             t = metric["TIME"] if "TIME" in metric else metric["T"]
             v = metric["VALUE"] if "VALUE" in metric else metric["V"]
             self.batch[path].append([t, v])
@@ -156,9 +159,20 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
         """
         Send data to Influxdb. Data that can not be sent will be kept in queued.
         """
+        metrics = []
+        def append_metric(time, tags, mname, value):
+            try:
+                value = float(value)
+                if math.isinf(value) or math.isnan(value):
+                    value = 0
+            except:
+                value = 0
+            mjson = {"time": time, "tags": tags, "measurement": mname, "fields": {"value": value}}
+            metrics.append(mjson)
+            log.debug("metric added: %s, %s, %s" % (str(tags), str(mname), str(value)))
+
         try:
             # build metrics data
-            metrics = []
             tags ={}
             for path in self.batch.keys():
                 # ex. path: server.node6.likwid.cpu1.dpmflops
@@ -192,14 +206,24 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                 for item in self.batch[path]:
                     time = item[0]
                     value = item[1]
-                    if str(value) == "nan" or math.isnan(float(value)):
-                        value = 0
-                    mjson = {
-                        "time": time,
-                        "tags": tags,
-                        "measurement": mname,
-                        "fields": { "value" : value }}
-                    metrics.append(mjson)
+
+                    if isinstance(value, list):
+                        quants = value[0]
+                        if isinstance(quants, list):
+                            # tags = {'host': u'tb033', 'collector': u'likwid', 'cpu': u'6'}
+                            # mname = dpmuops_quant10
+                            # value = [[28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612], 28.0601539612]
+                            nquants = len(quants)
+                            for n in xrange(0, nquants):
+                                tags["quant"] = 100 / (nquants - 1) * n
+                                append_metric(time, tags, mname, quants[n])
+                            if len(value) >= 2:
+                                tags["quant"] = "avg"
+                                append_metric(time, tags, mname, value[1])
+                    elif isinstance(value, basestring) or isinstance(value, float) or isinstance(value, int) or isinstance(value, long):
+                        append_metric(time, tags, mname, value)
+                    else:
+                        log.warn("Don't know how to handle metric with value type %s. Metric ignored!" % type(value))
             ret = self.write(metrics, "_" + MetricStore.group_suffix( self.group ))
             if ret:
                 self.batch = {}
