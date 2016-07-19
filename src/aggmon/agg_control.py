@@ -362,7 +362,7 @@ def cmd_to_collectors(context, cmd, msg, restrict=None):
         try:
             result[cmd_port] = send_rpc(context, cmd_port, cmd, **msg)
         except RPCNoReplyError as e:
-            log.warning("$r" % e)
+            log.warning("%r" % e)
             failed[cmd_port] = True
     return (result, failed,)
 
@@ -555,8 +555,8 @@ def component_control():
                                                             "TAG_VALUE": jobid})
 
 
-    log.debug("current_tags    : %r" % current_tags)
-    log.debug("fresh_joblist   : %r" % fresh_joblist)
+    log.info("current_tags    : %r" % current_tags)
+    log.info("fresh_joblist   : %r" % fresh_joblist)
     if len(outdated_joblist) > 0:
         log.info("outdated_joblist: %r" % outdated_joblist)
     for jobid in (current_tags - fresh_joblist - outdated_joblist):
@@ -609,12 +609,14 @@ def component_control():
                           restrict=coll_started_cmd_ports)
         jagg = component_states.get_state({"component": "job_agg", "jobid": jobid})
         if jagg is None or len(jagg) == 0:
-            # TODO: what do we do to recover?
-            continue
-        cmd_to_collectors(zmq_context, "subscribe", {"J": jobid,
-                                                     "TARGET": jagg["listen"]},
-                          restrict=coll_started_cmd_ports)
-        
+            # TODO: check if we create duplicate instances here!!!
+            if len(jnodes) >= config["services"]["job_agg"]["min_nodes"]:
+                create_job_agg_instance(jobid)
+        else:
+            cmd_to_collectors(zmq_context, "subscribe", {"J": jobid,
+                                                         "TARGET": jagg["listen"]},
+                              restrict=coll_started_cmd_ports)
+
     # subscriptions for not restarted data_collectors
     # actually handled in data_store restart, but may be wrong
 
@@ -647,6 +649,8 @@ def aggmon_control(argv):
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(threadName)s][%(filename)s:%(lineno)d] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
+
+    log.info("agg_control called with pargs: %r" % pargs)
 
     load_config(pargs.config)
 
@@ -693,11 +697,11 @@ def aggmon_control(argv):
     rpc.register_rpc("show_subs", lambda x: cmd_to_collectors(zmq_context, "show_subs", x))
     log.info("registered rpcs")
 
-    if not pargs.kill:
-        scheduler = Scheduler()
-        scheduler.start()
+    scheduler = Scheduler()
+    scheduler.start()
+
         # connect to the top level database. the one which stores the job lists
-        dbconf = config["database"]
+        #dbconf = config["database"]
         #store = MongoDBJobList(host_name=dbconf["dbhost"], port=None, db_name=dbconf["jobdbname"],
         #                       username=dbconf["user"], password=dbconf["password"])
 
