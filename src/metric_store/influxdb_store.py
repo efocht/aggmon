@@ -94,11 +94,12 @@ class InfluxDBStore(object):
     def exec_cmd( cmd ):
         proc = subprocess.Popen( cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE )
         o, e = proc.communicate() #return (stdout, stdierr)
-        p = "### send:\n" + cmd + "\n"
-        p += "### stdout:\n" + o if o else ""
-        p += "### stderr:\n" + e if e else ""
-        p += "\n"
-        log.debug(p)
+        m = re.search("^HTTP/1.1 2[0-9]{2}", o, re.MULTILINE)
+        if m:
+            log.debug(cmd.split("\n")[0] + "... ok " + m.group(0))
+        else:
+            log.debug(cmd)
+            log.error(o)
         return o, e
 
 
@@ -169,7 +170,7 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                 value = 0
             mjson = {"time": time, "tags": tags, "measurement": mname, "fields": {"value": value}}
             metrics.append(mjson)
-            log.debug("metric added: %s, %s, %s" % (str(tags), str(mname), str(value)))
+            #log.error("metric added: %s, %s, %s" % (str(tags), str(mname), str(value)))
 
         try:
             # build metrics data
@@ -217,9 +218,11 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                             for n in xrange(0, nquants):
                                 tags["quant"] = 100 / (nquants - 1) * n
                                 append_metric(time, tags, mname, quants[n])
+                                log.error("quant metric added: %s, %s, %s" % (str(tags), str(mname), str(quants[n])))
                             if len(value) >= 2:
                                 tags["quant"] = "avg"
                                 append_metric(time, tags, mname, value[1])
+                                log.error("quant metric added: %s, %s, %s" % (str(tags), str(mname), str(value[1])))
                     elif isinstance(value, basestring) or isinstance(value, float) or isinstance(value, int) or isinstance(value, long):
                         append_metric(time, tags, mname, value)
                     else:
