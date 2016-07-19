@@ -22,7 +22,7 @@ sys.path.append(
         os.path.join(
             os.path.dirname(__file__), "../")))
 from metric_store.mongodb_store import MongoDBMetricStore
-from metric_store.influxdb_store import InfluxDBMetricStore
+#from metric_store.influxdb_store import InfluxDBMetricStore
 
 
 log = logging.getLogger( __name__ )
@@ -36,6 +36,7 @@ class DataStore(threading.Thread):
         self.group = group
         self.coll_prefix = coll_prefix
         self.value_metrics_ttl = value_metrics_ttl
+        # TODO: add backend selection to config file
         self.store = MongoDBMetricStore(hostname=hostname, port=port, db_name=db_name, username=username, password=password, group=group)
         #self.store = InfluxDBMetricStore(hostname=hostname, port=port, db_name=db_name, username=username, password=password, group=group)
         if self.store is None:
