@@ -168,9 +168,13 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                     value = 0
             except:
                 value = 0
+            #mname = mname.replace(",", "\,")   # this should work with InfluxDB nwer than 0.9 (https://github.com/influxdata/influxdb/issues/3183)
+            new_name = mname.replace(",", "#")
+            if new_name != mname:
+                log.warn("escaped measurement name: '%s' to '%s'" % (mname, new_name))
+                mname = new_name
             mjson = {"time": time, "tags": tags, "measurement": mname, "fields": {"value": value}}
             metrics.append(mjson)
-            #log.error("metric added: %s, %s, %s" % (str(tags), str(mname), str(value)))
 
         try:
             # build metrics data
@@ -218,11 +222,9 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                             for n in xrange(0, nquants):
                                 tags["quant"] = 100 / (nquants - 1) * n
                                 append_metric(time, tags, mname, quants[n])
-                                log.error("quant metric added: %s, %s, %s" % (str(tags), str(mname), str(quants[n])))
                             if len(value) >= 2:
                                 tags["quant"] = "avg"
                                 append_metric(time, tags, mname, value[1])
-                                log.error("quant metric added: %s, %s, %s" % (str(tags), str(mname), str(value[1])))
                     elif isinstance(value, basestring) or isinstance(value, float) or isinstance(value, int) or isinstance(value, long):
                         append_metric(time, tags, mname, value)
                     else:
