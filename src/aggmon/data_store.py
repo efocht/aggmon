@@ -73,7 +73,8 @@ class DataStore(threading.Thread):
                 # do the work
                 #
                 log.debug("data_store: val = %r" % val)
-                self.store.insert(val)
+                for store in self.store:
+                    store.insert(val)
             except Exception as e:
                 log.error( "Exception in data_store req worker: %r, %r" % (e, val) )
             self.queue.task_done()
