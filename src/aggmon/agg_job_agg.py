@@ -166,9 +166,11 @@ class JobAggregator(threading.Thread):
                     #log.debug("value message: %r" % msg)
                     # this is a value message
                     metric = msg["N"]
+                    pc = metric.split(".")
+                    if len(pc) > 2 and pc[0] == "servers":
+                        metric = ".".join(pc[2:])
                     # add it to the cache
                     if metric not in self.metric_caches:
-                        log.debug("job_agg: creating mcache for metric '%s'" % metric)
                         self.metric_caches[metric] = MCache()
                     val = (msg["T"], msg["V"],)
                     #log.debug("job_agg: inserting %r to cache" % (val,))
