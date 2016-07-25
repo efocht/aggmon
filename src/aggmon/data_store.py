@@ -30,17 +30,25 @@ component = None
 
 
 class DataStore(threading.Thread):
-    def __init__(self, hostname, port, db_name, username="", password="",
+    def __init__(self, backends, hostname, ports, db_name, username="", password="",
                  group="/universe", coll_prefix="gmetric", value_metrics_ttl=180*24*3600):
+        self.backends = backends
         self.queue = Queue()
         self.group = group
         self.coll_prefix = coll_prefix
         self.value_metrics_ttl = value_metrics_ttl
-        # TODO: add backend selection to config file
-        self.store = MongoDBMetricStore(hostname=hostname, port=port, db_name=db_name, username=username, password=password, group=group)
-        #self.store = InfluxDBMetricStore(hostname=hostname, port=port, db_name=db_name, username=username, password=password, group=group)
-        if self.store is None:
-            raise Exception("Could not connect to DB")
+        self.store = []
+        for i in xrange(len(self.backends)):
+            backend = self.backends[i]
+            port = self.ports[i]
+            # TODO: add backend selection to config file
+            if backend == "mongodb":
+                store = MongoDBMetricStore(hostname=hostname, port=port, db_name=db_name, username=username, password=password, group=group)
+            elif backend == "influxdb":
+                store = InfluxDBMetricStore(hostname=hostname, port=port, db_name=db_name, username=username, password=password, group=group)
+            if store is None:
+                raise Exception("Could not connect to backend %s" % backend)
+            self.store.append(store)
         self.stopping = False
         threading.Thread.__init__(self, name="data_store")
         self.daemon = True
@@ -79,6 +87,7 @@ def aggmon_data_store(argv):
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5511", action="store", help="RPC command port")
     ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
     ap.add_argument('-e', '--expire', default=180, action="store", help="days for expiring value metrics")
+    ap.add_argument('-b', '--backend', default="mongodb", action="store", help="database backend(s), comma separated. Default is 'mongodb'.")
     ap.add_argument('-H', '--host', default="localhost", action="store", help="data store host")
     ap.add_argument('-n', '--port', default=None, action="store", help="data store port")
     ap.add_argument('-d', '--dbname', default="metricdb", action="store", help="database name")
@@ -97,9 +106,12 @@ def aggmon_data_store(argv):
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
 
+    pargs.backend = pargs.backend.split(",")
+    pargs.port = pargs.port.split(",")      # TODO: get rid of this and move it into (shared) config
+
     # open DB
     try:
-        store = DataStore(pargs.host, pargs.port, pargs.dbname, pargs.user, pargs.passwd,
+        store = DataStore(pargs.backend, pargs.host, pargs.port, pargs.dbname, pargs.user, pargs.passwd,
                            pargs.group, coll_prefix=pargs.prefix, value_metrics_ttl=pargs.expire*24*3600)
     except Exception as e:
         log.error("Failed to create DataStore: %r" % e)
