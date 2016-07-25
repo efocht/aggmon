@@ -11,6 +11,7 @@ import os, os.path
 import re, subprocess
 import json
 import subprocess
+import copy
 from metric_store import MetricStore
 
 __all__ = ["InfluxDBMetricStore"]
@@ -147,7 +148,6 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
         if self.batch_count <= self.metric_max_cache:
             if not self.batch.has_key(path):
                 self.batch[path] = []
-                #log.error("New key in batch: %s" % str(path))
             t = metric["TIME"] if "TIME" in metric else metric["T"]
             v = metric["VALUE"] if "VALUE" in metric else metric["V"]
             self.batch[path].append([t, v])
@@ -171,9 +171,10 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
             #mname = mname.replace(",", "\,")   # this should work with InfluxDB nwer than 0.9 (https://github.com/influxdata/influxdb/issues/3183)
             new_name = mname.replace(",", "#")
             if new_name != mname:
-                log.warn("escaped measurement name: '%s' to '%s'" % (mname, new_name))
+                # warning disabled since it floods the log
+                #log.warn("escaped measurement name: '%s' to '%s'" % (mname, new_name))
                 mname = new_name
-            mjson = {"time": time, "tags": tags, "measurement": mname, "fields": {"value": value}}
+            mjson = {"time": time, "tags": copy.deepcopy(tags), "measurement": mname, "fields": {"value": value}}
             metrics.append(mjson)
 
         try:
@@ -216,11 +217,13 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                         quants = value[0]
                         if isinstance(quants, list):
                             # tags = {'host': u'tb033', 'collector': u'likwid', 'cpu': u'6'}
-                            # mname = dpmuops_quant10
+                            # mname = dpmuops
                             # value = [[28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612, 28.0601539612], 28.0601539612]
+                            if "host" in tags.keys():
+                                del tags["host"]
                             nquants = len(quants)
                             for n in xrange(0, nquants):
-                                tags["quant"] = 100 / (nquants - 1) * n
+                                tags["quant"] = str(100 / (nquants - 1) * n)
                                 append_metric(time, tags, mname, quants[n])
                             if len(value) >= 2:
                                 tags["quant"] = "avg"
