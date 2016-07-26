@@ -42,6 +42,7 @@ class DataStore(threading.Thread):
             backend = self.backends[i]
             port = ports[i]
             # TODO: add backend selection to config file
+            log.debug("create %s store: %s:%s, %s" % (backend, hostname, str(port), db_name))
             if backend == "mongodb":
                 store = MongoDBMetricStore(hostname=hostname, port=port, db_name=db_name, username=username, password=password, group=group)
             elif backend == "influxdb":
@@ -68,15 +69,12 @@ class DataStore(threading.Thread):
                 time.sleep(0.05)
                 continue
     
+            log.debug("data_store insert metric '%r'" % val)
             try:
-                #
-                # do the work
-                #
-                log.debug("data_store: val = %r" % val)
                 for store in self.store:
                     store.insert(val)
             except Exception as e:
-                log.error( "Exception in data_store req worker: %r, %r" % (e, val) )
+                log.error( "Exception in data_store while insert in %r: %r" % (str(store.__class__.__name__), e) )
             self.queue.task_done()
 
 
@@ -166,7 +164,7 @@ def aggmon_data_store(argv):
     while True:
         try:
             s = receiver.recv()
-            log.info("received msg on PULL port: %r" % s)
+            log.debug("received msg on PULL port: %r" % s)
             msg = json.loads(s)
 
             cmd = None

@@ -77,7 +77,6 @@ class InfluxDBStore(object):
                 mstr += ","+",".join(tags)
             mstr += " value=%s %s" % (str(m["fields"]["value"]),str(int(m["time"]*1E9)),) 
             sendlist.append(mstr)
-
         curl_cmd = curl_cmd + " '" + "\n".join(sendlist) + "'"
         return self.exec_cmd( curl_cmd )
 
@@ -143,6 +142,7 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
         """
         Add metric to batch, send batch if sufficient data is available or batch timed out
         """
+        log.debug("inserted metric: %s" % str(metric))
         path = self.to_path( metric )
         metric["path"] = path
         if self.batch_count <= self.metric_max_cache:
@@ -150,7 +150,10 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                 self.batch[path] = []
             t = metric["TIME"] if "TIME" in metric else metric["T"]
             v = metric["VALUE"] if "VALUE" in metric else metric["V"]
-            self.batch[path].append([t, v])
+            if "J" in metric:
+                self.batch[path].append([t, v, metric["J"]])
+            else:
+                self.batch[path].append([t, v])
             self.batch_count += 1
         if self.batch_count >= self.batch_size or (time.time() - self.batch_timestamp) > 2**self.time_multiplier:
             self.batch_timestamp = time.time()
@@ -176,6 +179,7 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                 mname = new_name
             mjson = {"time": time, "tags": copy.deepcopy(tags), "measurement": mname, "fields": {"value": value}}
             metrics.append(mjson)
+            log.info("store metric: %s" % mjson)
 
         try:
             # build metrics data
@@ -212,6 +216,8 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                 for item in self.batch[path]:
                     time = item[0]
                     value = item[1]
+                    if len(item) > 2:
+                        tags["job"] = item[2]
 
                     if isinstance(value, list):
                         quants = value[0]
@@ -249,6 +255,8 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
         host = metric["HOST"] if "HOST" in metric else metric["H"]
         name = metric["NAME"] if "NAME" in metric else metric["N"]
         if name.split(".")[0] == "servers":
-            return name
-        return "servers." + host + "." + name
+            path = name
+        else:
+            path =  "servers." + host + "." + name
+        return path
 
