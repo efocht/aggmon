@@ -22,7 +22,7 @@ sys.path.append(
         os.path.join(
             os.path.dirname(__file__), "../")))
 from metric_store.mongodb_store import MongoDBMetricStore
-#from metric_store.influxdb_store import InfluxDBMetricStore
+from metric_store.influxdb_store import InfluxDBMetricStore
 
 
 log = logging.getLogger( __name__ )
@@ -40,7 +40,7 @@ class DataStore(threading.Thread):
         self.store = []
         for i in xrange(len(self.backends)):
             backend = self.backends[i]
-            port = self.ports[i]
+            port = ports[i]
             # TODO: add backend selection to config file
             if backend == "mongodb":
                 store = MongoDBMetricStore(hostname=hostname, port=port, db_name=db_name, username=username, password=password, group=group)
@@ -108,8 +108,10 @@ def aggmon_data_store(argv):
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
 
     pargs.backend = pargs.backend.split(",")
-    pargs.port = pargs.port.split(",")      # TODO: get rid of this and move it into (shared) config
-
+    if pargs.port:
+        pargs.port = pargs.port.split(",")      # TODO: get rid of this and move it into (shared) config
+    else:
+        pargs.port = [None, None]
     # open DB
     try:
         store = DataStore(pargs.backend, pargs.host, pargs.port, pargs.dbname, pargs.user, pargs.passwd,

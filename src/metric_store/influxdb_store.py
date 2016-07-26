@@ -40,8 +40,8 @@ class InfluxDBStore(object):
         elif self.username:
             self.url += "%s@" % self.username
         self.url += "%s:%s" % (self.hostname, self.port)
-        self.curl_get = "curl --get -is %s/query" % self.url
-        self.curl_write = "curl -is %s/write" % self.url
+        self.curl_get = "curl --get -i %s/query" % self.url
+        self.curl_write = "curl -i %s/write" % self.url
 
     def create_db( self, ext_name="" ):
         """
