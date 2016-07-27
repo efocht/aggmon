@@ -179,7 +179,7 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                 mname = new_name
             mjson = {"time": time, "tags": copy.deepcopy(tags), "measurement": mname, "fields": {"value": value}}
             metrics.append(mjson)
-            log.info("store metric: %s" % mjson)
+            log.debug("store metric: %s" % mjson)
 
         try:
             # build metrics data
