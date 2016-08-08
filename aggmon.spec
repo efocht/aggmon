@@ -39,7 +39,7 @@ install -m 644 src/aggmon/module-quantiles/quantiles.so %{buildroot}/%{python_si
 for P in bin/agg_*; do
     install -m 755 "$P" %{buildroot}%{_bindir}
 done
-for P in src/aggmon/agg_*.py* \
+for P in src/aggmon/*.py* \
   src/aggmon/basic_aggregators.py* src/aggmon/data_store.py* src/aggmon/msg_tagger.py* \
   src/aggmon/packet_sender.py* src/aggmon/repeat_timer.py*; do
     install -m 644 "$P" %{buildroot}/%{python_sitelib}/aggmon/
