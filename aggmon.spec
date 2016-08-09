@@ -27,6 +27,7 @@ rm -rf %{buildroot}
 install -m 755 -d %{buildroot}%{_bindir}
 install -m 755 -d %{buildroot}/%{python_sitelib}/metric_store
 install -m 755 -d %{buildroot}/%{python_sitelib}/aggmon
+install -m 755 -d %{buildroot}/%{_unitdir}
 install -m 644 src/metric_store/metric_store.py %{buildroot}/%{python_sitelib}/metric_store/
 install -m 644 src/metric_store/metric_store.pyc %{buildroot}/%{python_sitelib}/metric_store/
 install -m 644 src/metric_store/mongodb_store.py %{buildroot}/%{python_sitelib}/metric_store/
@@ -36,6 +37,7 @@ install -m 644 src/metric_store/influxdb_store.pyc %{buildroot}/%{python_sitelib
 install -m 644 src/metric_store/__init__.py %{buildroot}/%{python_sitelib}/metric_store/
 install -m 644 src/metric_store/__init__.pyc %{buildroot}/%{python_sitelib}/metric_store/
 install -m 644 src/aggmon/module-quantiles/quantiles.so %{buildroot}/%{python_sitelib}/aggmon/
+install -m 644 aggmon.service %{buildroot}/%{_unitdir}/
 for P in bin/agg_*; do
     install -m 755 "$P" %{buildroot}%{_bindir}
 done
@@ -52,7 +54,7 @@ rm -rf %{buildroot}
 %defattr(-, root, root)
 %{python_sitelib}/aggmon/*
 %{_bindir}/*
-
+%{_unitdir}/*
 
 %package -n metric-store
 Summary: MetricStore abstraction layer
