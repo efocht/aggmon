@@ -8,7 +8,7 @@ License: GPLv2
 Source: %{name}-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 BuildRequires: python-devel gcc gcc-c++ boost-python boost-devel
-Requires: python boost-python
+Requires: python boost-python python-pymongo
 
 %define debug_package %{nil}
 
