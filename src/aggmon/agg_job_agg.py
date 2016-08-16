@@ -8,7 +8,10 @@ import pdb
 #from pymongo import MongoClient, ASCENDING
 import threading
 import time
-import ujson
+try:
+    import ujson as json
+except:
+    import json
 import zmq
 from Queue import Queue, Empty
 from agg_component import get_kwds, ComponentState
@@ -270,7 +273,7 @@ def aggmon_jobagg(argv):
         try:
             s = receiver.recv()
             #log.debug("received msg on PULL port: %r" % s)
-            msg = ujson.loads(s)
+            msg = json.loads(s)
 
             cmd = None
             if "_COMMAND_" in msg:
