@@ -42,6 +42,14 @@ e1166
      mom_service_port = 15002
      mom_manager_port = 15003
      gpu_status = timestamp=Wed Feb 17 10:55:40 2016
+
+tb020
+     state = down
+     np = 16
+     properties = tinyblue,gbit1,turbo,noturbo,f2.66,f2.53,f2.4,f2.26,f2.13,f2.0,f1.86,f1.73,f1.6,likwid
+     ntype = cluster
+     status = rectime=1471420453,varattr=,jobs=221502.tbadm1.rrze.uni-erlangen.de,state=free,netload=633823847887,gres=,loadave=0.01,ncpus=16,physmem=12292976kb,availmem=24042508kb,totmem=24611692kb,idletime=5608627,nusers=1,nsessions=1,sessions=1486,uname=Linux tb020 3.13.0-88-generic #135-Ubuntu SMP Wed Jun 8 21:10:42 UTC 2016 x86_64,opsys=linux
+     gpus = 0
 """
 
     
@@ -110,10 +118,14 @@ class PBSNodes(object):
             m = re.match("^\s+(\S+) = (.*)$", line)
             if m:
                 if node is None:
-                    log.error("Unexpected node attribute line. No node set, yet! Skipping.")
                     continue
                 attrib = m.group(1)
                 value = m.group(2)
+                if attrib == "state" and value == "down":
+                    del state[node]
+                    node = None
+                    log.info("Node '%s' is down! Skipping.")
+                    continue
                 m = re.match("^\S+=\S+", value)
                 if m:
                     # sub-attributes match
@@ -182,15 +194,28 @@ def mongodb_joblist():
 if __name__ == "__main__":
     from aggmon.agg_rpc import send_rpc
     import zmq
+    import pprint
 
-    host = "localhost"; port = 22
+    host = "localhost"
+    port = 22
+    pull_state_cmd = ""
     if len(sys.argv) > 1:
-        host = sys.argv[1]
+        arg1 = sys.argv[1]
+        if arg1.split() == 1 and os.system("ping -c 1 " + arg1) == 0:
+            host = arg1
+        else:
+            pull_state_cmd = arg1
     if len(sys.argv) > 2:
         port = int(sys.argv[2])
 
-    pbs = PBSNodes(host=host, port=port)
-    pbs.update()
+    cols = os.popen('stty size', 'r').read().split()[1]
+
+    pbs = PBSNodes(host=host, port=port, pull_state_cmd=pull_state_cmd)
+    pbs.update(test=False)
+    pp = pprint.PrettyPrinter(indent=1, width=cols)
+    pp.pprint(pbs.job_nodes)
+    sys.exit(0)
+
     mjoblist = mongodb_joblist()
 
     num_jobs_mongo = len(mjoblist.keys())
