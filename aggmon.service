@@ -15,13 +15,14 @@ Environment=agg_pidfile=/var/run/agg_control.pid
 PIDFile=/var/lib/aggmon/agg_control.pid
 ExecStartPre=/bin/mkdir -p ${statedir}
 ExecStartPre=/bin/mkdir -p ${agg_statedir}
-ExecStart=/usr/local/sbin/agg_control -c ${agg_configdir} \
-                                      --state-file ${agg_statefile} \
-                                      --pid-file ${agg_pidfile} 
-ExecStop=/usr/local/sbin/agg_control -c ${agg_configdir} \
-                                     --state-file ${agg_statefile} \
-                                     --pid-file ${agg_pidfile} \
-                                     --kill
+ExecStart=/usr/bin/agg_control -c ${agg_configdir} \
+                               --state-file ${agg_statefile} \
+                               --pid-file ${agg_pidfile} 
+ExecStop=/usr/bin/agg_control -c ${agg_configdir} \
+                              --state-file ${agg_statefile} \
+                              --pid-file ${agg_pidfile} \
+                              --kill
 ExecStopPost=/bin/bash -c 'test -f ${agg_pidfile} && ps -p `cat ${agg_pidfile}` && kill `cat ${agg_pidfile}`;rm -f ${agg_pidfile}'
+
 [Install]
 WantedBy=multi-user.target

@@ -8,7 +8,7 @@ License: GPLv2
 Source: %{name}-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 BuildRequires: python-devel gcc gcc-c++ boost-python boost-devel
-Requires: python boost-python
+Requires: python boost-python python-pymongo
 
 %define debug_package %{nil}
 
@@ -24,26 +24,20 @@ python2 -m compileall .
 
 %install
 rm -rf %{buildroot}
-install -m 755 -d %{buildroot}%{_bindir}
-install -m 755 -d %{buildroot}/%{python_sitelib}/metric_store
-install -m 755 -d %{buildroot}/%{python_sitelib}/aggmon
-install -m 644 src/metric_store/metric_store.py %{buildroot}/%{python_sitelib}/metric_store/
-install -m 644 src/metric_store/metric_store.pyc %{buildroot}/%{python_sitelib}/metric_store/
-install -m 644 src/metric_store/mongodb_store.py %{buildroot}/%{python_sitelib}/metric_store/
-install -m 644 src/metric_store/mongodb_store.pyc %{buildroot}/%{python_sitelib}/metric_store/
-install -m 644 src/metric_store/influxdb_store.py %{buildroot}/%{python_sitelib}/metric_store/
-install -m 644 src/metric_store/influxdb_store.pyc %{buildroot}/%{python_sitelib}/metric_store/
-install -m 644 src/metric_store/__init__.py %{buildroot}/%{python_sitelib}/metric_store/
-install -m 644 src/metric_store/__init__.pyc %{buildroot}/%{python_sitelib}/metric_store/
+install -m 755 -d %{buildroot}/%{_bindir}
+install -m 755 -d %{buildroot}/%{_unitdir}
+install -m 755 -d %{buildroot}/%{python_sitelib}
+install -m 644 aggmon.service %{buildroot}/%{_unitdir}/
+for P in bin/*; do
+    install -m 755 "$P" %{buildroot}/%{_bindir}/
+done
+for D in aggmon res_mngr metric_store; do
+    install -m 755 -d %{buildroot}/%{python_sitelib}/"$D"
+    for P in src/"$D"/*.py*; do
+        install -m 644 "$P" %{buildroot}/%{python_sitelib}/"$D"/
+    done
+done
 install -m 644 src/aggmon/module-quantiles/quantiles.so %{buildroot}/%{python_sitelib}/aggmon/
-for P in bin/agg_*; do
-    install -m 755 "$P" %{buildroot}%{_bindir}
-done
-for P in src/aggmon/agg_*.py* \
-  src/aggmon/basic_aggregators.py* src/aggmon/data_store.py* src/aggmon/msg_tagger.py* \
-  src/aggmon/packet_sender.py* src/aggmon/repeat_timer.py*; do
-    install -m 644 "$P" %{buildroot}/%{python_sitelib}/aggmon/
-done
 
 %clean
 rm -rf %{buildroot}
@@ -51,8 +45,9 @@ rm -rf %{buildroot}
 %files
 %defattr(-, root, root)
 %{python_sitelib}/aggmon/*
+%{python_sitelib}/res_mngr/*
 %{_bindir}/*
-
+%{_unitdir}/*
 
 %package -n metric-store
 Summary: MetricStore abstraction layer
