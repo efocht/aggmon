@@ -205,6 +205,8 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
                 return []
             query = self._parse_query( args[0] )
             return self.op_locate( query )
+        if op == "menu_types":
+            return self.op_menu_types( )
 
 
     def op_describe( self, key ):
@@ -230,6 +232,10 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
         # is this needed?
         result["_type"] = cls.__name__
         return result
+
+
+    def op_menu_types( self ):
+        return [ "MGroup", "MHost", "MMetric" ]
 
 
     def op_locate( self, query ):
