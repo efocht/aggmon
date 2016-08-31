@@ -18,7 +18,7 @@ class MetricStore:
             log.warn("md cache is empty!")
             return
         for d in md:
-            log.info("md cache data found: HOST=%s, NAME=%s, TYPE=%s" % (str(d["HOST"]), str(d["NAME"]), str(d["TYPE"])))
+            log.debug("md cache data found: HOST=%s, NAME=%s, TYPE=%s" % (str(d["HOST"]), str(d["NAME"]), str(d["TYPE"])))
             self.md_cache.set(d["HOST"], d["NAME"], d["TYPE"])
 
     def show_md_cache(self):
