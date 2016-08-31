@@ -206,7 +206,6 @@ class MongoDBMetricStore(MongoDBStore, MetricStore):
 
     def last_md( self ):
         return self._col_md.find().skip(self._col_md.count() - 1)
-    }
 
     def insert_val( self, metric ):
         ## EF: we switch to integer values for the time, i.e. second granularity
