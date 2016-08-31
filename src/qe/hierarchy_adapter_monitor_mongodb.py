@@ -106,12 +106,24 @@ def time_series_wrapper(hierarchy_adapter, _id, obj, *args):
     return val
 
 
+def tree_changed(hierarchy_adapter, _id, obj, *args):
+    #
+    # TODO: if this needs to be solved, there is a problem. We need the past state in order to
+    # detect whether anything changed. But this adapter should actually be stateless.
+    # We could use the time encoded in the record ID of the last record in the metadata coillection, somehow.
+    #
+    #val = hierarchy_adapter.store.last_md()
+    # return False for now, means, no change in the hierarchy. This is a wrong fake result.
+    return False
+
 #
 # moves this away from here ASAP!
 #
 
 class MGroup(ContainerObject):
-    ATTRIBUTES = {}
+    ATTRIBUTES = {
+        "is_dirty": { "function": tree_changed}
+    }
     CONTAINS_TYPES = ["MMetric", "MGroup", "MHost"]
 
 class MHost(ContainerObject):

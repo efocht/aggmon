@@ -204,6 +204,10 @@ class MongoDBMetricStore(MongoDBStore, MetricStore):
     def find_md( self, match=None, proj=None ):
         return self._col_md.find( match, proj )
 
+    def last_md( self ):
+        return self._col_md.find().skip(self._col_md.count() - 1)
+    }
+
     def insert_val( self, metric ):
         ## EF: we switch to integer values for the time, i.e. second granularity
         ##     the datetime type metric takes up too much space in mongodb.
