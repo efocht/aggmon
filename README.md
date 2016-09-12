@@ -47,7 +47,7 @@ config:
         master: none
 ```
 
-Aggmon can use two alternative backends to store metric data: InfluxDB and MongoDB.
+Aggmon can use two alternative backends to store metric data: [InfluxDB](https://en.wikipedia.org/wiki/InfluxDB) and [MongoDB](https://en.wikipedia.org/wiki/MongoDB).
 By default aggmon uses a MongoDB as backend. Alternatively aggmon can store data in InfluxDB which requires to add
 a __cmd_opts__ block under __data_store__ and set the __--backend__ command line option to __influxdb__. It is also
 possible to send metrics to both backends at the same time which requires to specify the __--backend__ option as a
