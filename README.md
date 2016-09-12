@@ -4,7 +4,7 @@
 TODO
 
 ## Basic Configuration
-Aggmon configuration files are by default stored in a directory named _/etc/aggmon_. All (valid) YAML files located there are
+Aggmon configuration files are by default stored in a directory named _/etc/aggmon_. All (valid) [YAML](https://en.wikipedia.org/wiki/YAML) files located there are
 parsed and build together the aggmon configurataion. Usually there is a _config.yaml_ file which contains the basic
 configuration within a block named __config__. Configuration files are read and parsed by _agg_control_ and are passed to
 other aggmon components like aggregators.
