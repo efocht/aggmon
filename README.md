@@ -105,7 +105,7 @@ __agg-templates__ block.
 Metrics which should be aggregated are defined in the block __metrics__ which could be either a list of exact metric
 names (__[metric_name1,metric_name2,...]__) or a regular expression (__RE:.\*part_of_metric_name.\*__). The method or
 function which will be used to calculate the aggregated values is specified with the __agg_type__ block. The resulting
-metric will be named like set in __agg_metric_name __. Note, that this block can contain place holders __metric__ which
+metric will be named like set in __agg_metric_name__. Note, that this block can contain place holders __metric__ which
 refers to the name and __agg_type__ which represents the string specified in the __agg_type__ block. 
 In the example above the first call aggregates a single metric called "load_one" by building the average value in an
 intervall of 300 seconds and sends this value with the name of "load_one_avg" to the backend.
