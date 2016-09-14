@@ -93,14 +93,19 @@ class InfluxDBStore(object):
     @staticmethod
     def exec_cmd( cmd ):
         proc = subprocess.Popen( cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE )
-        o, e = proc.communicate() #return (stdout, stdierr)
-        m = re.search("^HTTP/1.1 2[0-9]{2}", o, re.MULTILINE)
+        o, e = proc.communicate() #return (stdout, stderr)
+        m = re.search(r"^HTTP/1\.[0,1] 2[0-9]{2}", o, re.MULTILINE)
         if m:
             log.debug(cmd.split("\n")[0] + "... ok " + m.group(0))
+            m = re.match(r"^.*\n\n(.*)", o, re.MULTILINE)
+            if m:
+                return m.group(0), ""
+            return "", ""
         else:
             log.debug(cmd)
             log.error(o)
-        return o, e
+            return "", o + e
+
 
 
 class InfluxDBMetricStore(InfluxDBStore, MetricStore):
@@ -127,8 +132,10 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
         self.time_multiplier = 1
 
     def find(self, match=""):
-        o, _e = self.query( match, "_" + MetricStore.group_suffix( self.group ) )
+        o, e = self.query( match, "_" + MetricStore.group_suffix( self.group ) )
         results = []
+        if e:
+            return results
         try:
             results = json.loads( o );
             return results["results"]
@@ -156,8 +163,8 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                 self.batch[path].append([t, v])
             self.batch_count += 1
         if self.batch_count >= self.batch_size or (time.time() - self.batch_timestamp) > 2**self.time_multiplier:
-            self.batch_timestamp = time.time()
             self.send_batch()
+            self.batch_timestamp = time.time()
 
     def send_batch(self):
         """
@@ -170,8 +177,8 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                 if math.isinf(value) or math.isnan(value):
                     value = 0
             except:
-                value = 0
-            #mname = mname.replace(",", "\,")   # this should work with InfluxDB nwer than 0.9 (https://github.com/influxdata/influxdb/issues/3183)
+                value = str(value)
+            #mname = mname.replace(",", "\,")   # this should work with InfluxDB newer than 0.9 (https://github.com/influxdata/influxdb/issues/3183)
             new_name = mname.replace(",", "#")
             if new_name != mname:
                 # warning disabled since it floods the log
@@ -238,8 +245,9 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                         append_metric(time, tags, mname, value)
                     else:
                         log.warn("Don't know how to handle metric with value type %s. Metric ignored!" % type(value))
-            ret = self.write(metrics, "_" + MetricStore.group_suffix( self.group ))
-            if ret:
+            _o, e = self.write(metrics, "_" + MetricStore.group_suffix( self.group ))
+            if not e:
+                log.info("Send %d metrics to database. Batch starts at @%d." % (len(metrics), self.batch_timestamp))
                 self.batch = {}
                 self.batch_count = 0
                 self.time_multiplier = 1
