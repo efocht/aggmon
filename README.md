@@ -74,12 +74,14 @@ __cmd_opts__ block.
 
 
 ## Aggregation
+
 Aggregation is defined as part of the aggmon configuration and is by default located in _/etc/aggmon/aggregate.yaml_ and
 _/etc/aggmon/agg-template.yaml_.
 
-Example aggregation definition:
+An example for aggregation definitions is below:
 
 ```yaml
+# /etc/aggmon/aggregate.yaml
 agg:
     - template:        default
       push_target:     "@TOP_STORE"
@@ -87,6 +89,7 @@ agg:
       metrics:         [load_one]
     - template:        [default,long-interval]
       push_target:     "@TOP_STORE"
+      agg_type:        max
       agg_metric_name: "%(metric)s_%(agg_type)s"
       metrics:         [cpu_temp]
     - push_target:     "@TOP_STORE"
@@ -96,7 +99,9 @@ agg:
       ttl:             180
       agg_metric_name: "%(metric)s_%(agg_type)s"
       metrics:         RE:.*likwid.*
-
+```
+```yaml
+# /etc/aggmon/agg-template.yaml
 agg-templates:
      default:
          agg_class:       job
@@ -108,16 +113,22 @@ agg-templates:
          interval:        300
 ```
 
-Each element in the list defined in the __agg__ block leads to an aggregation call.
-Every call of an aggregation function shares the specified settings like time interval and value type in the
-__agg-templates__ block.
-Metrics which should be aggregated are defined in the block __metrics__ which could be either a list of exact metric
-names (__[metric_name1,metric_name2,...]__) or a regular expression (__RE:.\*part_of_metric_name.\*__). The method or
-function which will be used to calculate the aggregated values is specified with the __agg_type__ block. The resulting
-metric will be named like set in __agg_metric_name__. Note, that this block can contain place holders __metric__ which
-refers to the name and __agg_type__ which represents the string specified in the __agg_type__ block. 
-In the example above the first call aggregates a single metric called "load_one" by building the average value in an
-intervall of 300 seconds and sends this value with the name of "load_one_avg" to the backend.
+Each element in the list defined in the __agg__ section leads to an aggregation block for one or multiple metrics. The attributes defining an aggregation block are:
+- __template__: python list of aggregation templates to inherit from. Aggregation templates are usually defined in _/etc/aggmon/agg-template.yaml_.
+- __agg_class__: the aggregation class. Currently only the "job" aggregation is implemented.
+- __agg_type__: specifies the aggregation function used within the current block. Currently implemented are: __min__, __max__, __sum__, __avg__, __quant10__.
+- __interval__: time interval of aggregation in seconds.
+- __ttl__: time to live for the aggregated metric.
+- __metrics__: the metrics that shall be aggregated, either specified as a list of exact metric
+names (__[metric_name1,metric_name2,...]__) or a string prefixed by "RE:" and the remainder representing a regular expression (__RE:.\*part_of_metric_name.\*__).
+- __agg_metric_name__: a python template for generating the aggregated metric's name. Besides the attribute names one can use the variable __metric__ in the template for including the original metric name.
+- __push_target__: specifies where to push the aggregated metric to. This can be the ZeroMQ URI of the listen port of one of the components or a symbolic name starting with "@". Currently only the symbolic push target __@TOP_STORE__ is implemented. It refers to the top group's data store.
 
-Aggregation functions can be easily added to aggmon. At the moment there are some predefined functions like
-(__agg_type__) __min__, __max__, __sum__, __avg__, __quant10__.
+The aggregation class "job" is aggregating values only from the member nodes of a job. This wokrs only when jobs are using dedicated nodes and don't share nodes. The job aggregators subscribe to all collectors but receive only metrics tagged with the job ID they care for. For each job an own instance of a job aggregator will be spawned, it caches the latest metrics from the nodes of the job.
+
+In the example above the first block aggregates a single metric called "load_one" by building the average value every 
+300 seconds and sends the resulting metric with the name of "load_one_avg" to the top level data store. It uses the _default_ template.
+
+The second aggregation block computes the maximum cpu temperature (__cpu_temp__) for the nodes of a job. It inherits attributes from two templates and overwrites the __agg_type__.
+
+The third example is aggregating all metrics that contain the string "likwid" in their name to 10 percent percentiles (__quant10__ aggregation type). The result is a vector of 11 values plus the average of all values. This aggregation block is using no templates.
