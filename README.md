@@ -1,7 +1,16 @@
 # aggmon
 
 ## Overview
-TODO
+
+Aggmon is a framework aimed for very large scale system monitoring with flexible aggregation. It achieves scalability by using a distributed architecture resembling a natural monitoring hierarchy. Aggmon is receiving monitoring data from the monitored nodes, is processing, tagging, aggregating and storing it. The components are linked with publish-subscribe mechanisms built on top of ZeroMQ.
+
+Data collection is done at node level by components like ganglia gmond or diamond. Nodes are grouped and send their metrics to an aggmon collector instance that is responsible for their group. 
+
+Data store components subscribe to the collectors and store monitoring data in one or multiple databases. Data store components are organized according to a hierarchy and shard the monitoring data in order to achieve scalability.
+
+Aggregators subscribe to the collectors and push the aggregated results to the data stores.
+
+The aggmon controller is keeping track of the state of aggmon components, spawns, kills or re-spawns them in case of failure.
 
 ## Basic Configuration
 Aggmon configuration files are by default stored in a directory named _/etc/aggmon_. All (valid) [YAML](https://en.wikipedia.org/wiki/YAML) files located there are
