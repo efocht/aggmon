@@ -4,7 +4,7 @@
 
 Aggmon is a framework aimed for very large scale system monitoring with flexible aggregation. It achieves scalability by using a distributed architecture resembling a natural monitoring hierarchy. Aggmon is receiving monitoring data from the monitored nodes, is processing, tagging, aggregating and storing it. The components are linked with publish-subscribe mechanisms built on top of [ZeroMQ](https://en.wikipedia.org/wiki/ZeroMQ).
 
-Data collection is done at node level by components like ganglia gmond or diamond. Nodes are grouped and send their metrics to an aggmon collector instance that is responsible for their group. 
+Data collection is done at node level by components like [Ganglia](https://en.wikipedia.org/wiki/Ganglia_(software)) gmond or [Diamond](http://diamond.readthedocs.io/en/latest/). Nodes are grouped and send their metrics to an aggmon collector instance that is responsible for their group. 
 
 Data store components subscribe to the collectors and store monitoring data in one or multiple databases. Data store components are organized according to a hierarchy and shard the monitoring data in order to achieve scalability.
 
