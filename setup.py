@@ -109,7 +109,7 @@ setup(
         "aggmon.basic_aggregators" : ["src/aggmon/basic_aggregators.py"],
         "metric_store.metric_store" : ["src/metric_store/metric_store.py"],
         "metric_store.mongodb_store" : ["src/metric_store/mongodb_store.py"],
-        "metric_store.influxdb_store" : ["src/metric_store/influxdb_store.py"],
+        "metric_store.write_influx" : ["src/metric_store/influxdb_http_lib.py"],
         "res_mngr.pbsnodes" : ["src/res_mngr/pbsnodes.py"]
     },
     package_dir = {"aggmon" : "src/aggmon",
@@ -121,7 +121,7 @@ setup(
                   "aggmon.agg_component", "aggmon.agg_job_command", "aggmon.scheduler",
                   "aggmon.repeat_timer", "aggmon.repeat_event", "aggmon.msg_tagger",
                   "aggmon.agg_mcache", "aggmon.basic_aggregators", "aggmon.quantiles",
-                  "metric_store.metric_store", "metric_store.mongodb_store",
+                  "metric_store.metric_store", "metric_store.mongodb_store", "metric_store.influxdb_http_lib",
                   "metric_store.influxdb_store", "res_mngr.pbsnodes"],
     data_files = [("/etc/aggmon", ["config.d/config.yaml", "config.d/aggregate.yaml", "config.d/agg-templates.yaml"]),
                   #("/etc/init.d", ["misc/aggmon"]),

@@ -11,12 +11,14 @@ import os, os.path
 import re, subprocess
 import json
 import subprocess
-import copy
+import gc
+import sys
 from metric_store import MetricStore
+from influxdb_http_lib import write_influx
 
 __all__ = ["InfluxDBMetricStore"]
 
-BATCH_SIZE = 96
+BATCH_SIZE = 1024
 CACHE_SIZE = 1024
 TIME_PRECISION = "s"
 TAGFILE = ""
@@ -77,8 +79,10 @@ class InfluxDBStore(object):
                 mstr += ","+",".join(tags)
             mstr += " value=%s %s" % (str(m["fields"]["value"]),str(int(m["time"]*1E9)),) 
             sendlist.append(mstr)
-        curl_cmd = curl_cmd + " '" + "\n".join(sendlist) + "'"
-        return self.exec_cmd( curl_cmd )
+        #curl_cmd = curl_cmd + " '" + "\n".join(sendlist) + "'"
+        #return self.exec_cmd( curl_cmd )
+        return write_influx(self.hostname, self.port, self.db_name, sendlist, username=self.username, password=self.password)
+        
 
     def drop_all( self, ext_name="" ):
         """
@@ -166,11 +170,26 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
             self.send_batch()
             self.batch_timestamp = time.time()
 
+            gc.collect()
+            obj_sizes = {}
+            obj_refs = {}
+            objs = gc.get_objects()
+            biggest_size = 0 
+            biggest_id = None 
+            for obj in objs:
+                obj_id = id(obj)
+                obj_size = sys.getsizeof(obj)
+                obj_refs[obj_id] = obj 
+                if obj_size > biggest_size:
+                    biggest_id = obj_id
+                    biggest_size = obj_size
+            log.info("num objs: %d, biggest obj: %s, size: %d, id: %d" % (len(objs), type(obj_refs[biggest_id]), biggest_size, biggest_id))
+
     def send_batch(self):
         """
         Send data to Influxdb. Data that can not be sent will be kept in queued.
         """
-        metrics = []
+        metrics_buffer = []
         def append_metric(time, tags, mname, value):
             try:
                 value = float(value)
@@ -184,13 +203,13 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                 # warning disabled since it floods the log
                 #log.warn("escaped measurement name: '%s' to '%s'" % (mname, new_name))
                 mname = new_name
-            mjson = {"time": time, "tags": copy.deepcopy(tags), "measurement": mname, "fields": {"value": value}}
-            metrics.append(mjson)
+            mjson = {"time": time, "tags": tags, "measurement": mname, "fields": {"value": value}}
+            metrics_buffer.append(mjson)
             log.debug("store metric: %s" % mjson)
 
         try:
             # build metrics data
-            tags ={}
+            tags = {}
             for path in self.batch.keys():
                 # ex. path: server.node6.likwid.cpu1.dpmflops
                 pathlist = path.split(".")
@@ -245,9 +264,8 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                         append_metric(time, tags, mname, value)
                     else:
                         log.warn("Don't know how to handle metric with value type %s. Metric ignored!" % type(value))
-            _o, e = self.write(metrics, "_" + MetricStore.group_suffix( self.group ))
+            _o, e = self.write(metrics_buffer, "_" + MetricStore.group_suffix( self.group ))
             if not e:
-                log.info("Send %d metrics to database. Batch starts at @%d." % (len(metrics), self.batch_timestamp))
                 self.batch = {}
                 self.batch_count = 0
                 self.time_multiplier = 1
