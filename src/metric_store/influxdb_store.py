@@ -14,12 +14,12 @@ import subprocess
 import gc
 import sys
 from metric_store import MetricStore
-from influxdb_http_lib import write_influx
+from influxdb_http_lib import write_influx, createdb_influx
 
 __all__ = ["InfluxDBMetricStore"]
 
-BATCH_SIZE = 1024
-CACHE_SIZE = 1024
+BATCH_SIZE = 999
+CACHE_SIZE = 999
 TIME_PRECISION = "s"
 TAGFILE = ""
 
@@ -49,9 +49,10 @@ class InfluxDBStore(object):
         """
         curl --get -i http://localhost:8086/query --data-urlencode "q=CREATE DATABASE metric_universe"
         """
-        sql_cmd = "'q=CREATE DATABASE %s'" % (self.db_name + ext_name)
-        curl_cmd = self.curl_get + " --data-urlencode " + sql_cmd
-        return self.exec_cmd( curl_cmd )
+        #sql_cmd = "'q=CREATE DATABASE %s'" % (self.db_name + ext_name)
+        #curl_cmd = self.curl_get + " --data-urlencode " + sql_cmd
+        #return self.exec_cmd( curl_cmd )
+        return createdb_influx(self.hostname, self.port, self.db_name, username=self.username, password=self.password)
 
     def query( self, query, ext_name="" ):
         """

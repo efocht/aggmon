@@ -10,7 +10,7 @@ import base64
 import re
 import logging
 
-__all__ = ["write_influx"]
+__all__ = ["write_influx", "createdb_influx"]
 
 log = logging.getLogger( __name__ )
 
@@ -85,8 +85,10 @@ def POST(url, data={}, headers={}, timeout=10):
     return 200, "OK", out
 
 def write_influx(hostname, port, db, measurements, username=None, password=None, apitoken=None):
-    """Helper function to send measurements to an InfluxDB instance"""
-    if len(measurements) == 0 or len(hostname) == 0 or len(db) == 0 or not isinstance(port, int) or port < 1 or port > 65535:
+    """
+    Helper function to send measurements to an InfluxDB instance
+    """
+    if not measurements or not hostname or not db or not isinstance(port, int) or port < 1 or port > 65535:
         return "", "Parameter missing/mismatch."
     if isinstance(measurements, str):
         measurements = [measurements]
@@ -99,11 +101,32 @@ def write_influx(hostname, port, db, measurements, username=None, password=None,
     url = "http://%s:%d/write?db=%s" % (hostname, port, db,)
     data = "\n".join(measurements)
     err, estr, data = POST(url, data=data, headers=headers)
-    log.info("send %d metrics to influxdb: %d" % (len(measurements), err))
     if err >= 200 and err < 300:
+        log.info("send %d metrics to influxdb: %d" % (len(measurements), err))
         return "", ""
+    log.error("failed to sending %d metrics to influxdb: %d, %s" % (len(measurements), err, estr))
     return "", estr
 
+def createdb_influx(hostname, port, db, username=None, password=None, apitoken=None):
+    """
+    Helper function to create an InfluxDB database
+    """
+    if not hostname or not db or not isinstance(port, int) or port < 1 or port > 65535:
+        return "", "Parameter missing/mismatch."
+    headers = {"Accept": "*/*"}
+    if username and password:
+        base64string = base64.encodestring('%s:%s' % (username, password)).replace('\n', '')
+        headers.update({"Authorization" : "Basic %s" % base64string})
+    elif apitoken:
+        headers.update({"Authorization" : "Bearer %s" % (apitoken,)})
+    # GET /query?q=CREATE%20DATABASE%20metric_universe HTTP/1.1
+    url = "http://%s:%d/query?q=CREATE%%20DATABASE%%20%s" % (hostname, port, db)
+    err, estr, data = GET(url, headers=headers)
+    if err >= 200 and err < 300:
+        log.info("created database %s: %d" % (db, err))
+        return "", ""
+    log.error("failed to create database %s: %d, %s" % (db, err, estr))
+    return "", estr
 
 if __name__ == "__main__":
     data = ["Local_timer_interrupts,host=tb003,collector=interrupts,cpu=2 value=43709748.0 1473834212000000000",
@@ -113,9 +136,14 @@ if __name__ == "__main__":
     db = "test"
     username = "testuser"
     password = "testpass"
+    o, e = createdb_influx(hostname, port, db, username=username, password=password)
+    if e:
+        print("create db failed: %s" % e)
+    else:
+        print("create db ok")
     o, e = write_influx(hostname, port, db, data, username=username, password=password)
     if e:
-        print("Send failed")
+        print("send failed: %s" % e)
     else:
-        print("Send ok")
+        print("send ok")
 

@@ -110,6 +110,7 @@ setup(
         "metric_store.metric_store" : ["src/metric_store/metric_store.py"],
         "metric_store.mongodb_store" : ["src/metric_store/mongodb_store.py"],
         "metric_store.write_influx" : ["src/metric_store/influxdb_http_lib.py"],
+        "metric_store.createdb_influx" : ["src/metric_store/influxdb_http_lib.py"],
         "res_mngr.pbsnodes" : ["src/res_mngr/pbsnodes.py"]
     },
     package_dir = {"aggmon" : "src/aggmon",

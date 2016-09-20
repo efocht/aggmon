@@ -4,5 +4,5 @@ from influxdb_store import *
 from influxdb_http_lib import *
 
 __all__ = ["InfluxDBMetricStore", "MetricStore", "MongoDBJobList", "MongoDBMetricStore", "MongoDBJobStore",
-           "MongoDBStatusStore", "write_influx"]
+           "MongoDBStatusStore", "write_influx", "createdb_influx"]
 
