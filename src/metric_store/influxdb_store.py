@@ -18,8 +18,8 @@ from influxdb_http_lib import write_influx, createdb_influx
 
 __all__ = ["InfluxDBMetricStore"]
 
-BATCH_SIZE = 999
-CACHE_SIZE = 999
+BATCH_SIZE = 1000
+MAX_CACHE_SIZE = 4000
 TIME_PRECISION = "s"
 TAGFILE = ""
 
@@ -124,8 +124,6 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
         self.group = group
         self.create_db( "_" + MetricStore.group_suffix( self.group ) )
         self._val_ttl = val_ttl
-        self.batch_size = BATCH_SIZE
-        self.metric_max_cache = CACHE_SIZE
         self.batch_count = 0
         self.time_precision = TIME_PRECISION
         self.addtags = False
@@ -154,37 +152,35 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
         """
         Add metric to batch, send batch if sufficient data is available or batch timed out
         """
-        log.debug("inserted metric: %s" % str(metric))
         path = self.to_path( metric )
-        metric["path"] = path
-        if self.batch_count <= self.metric_max_cache:
-            if not self.batch.has_key(path):
-                self.batch[path] = []
-            t = metric["TIME"] if "TIME" in metric else metric["T"]
-            v = metric["VALUE"] if "VALUE" in metric else metric["V"]
-            if "J" in metric:
-                self.batch[path].append([t, v, metric["J"]])
-            else:
-                self.batch[path].append([t, v])
-            self.batch_count += 1
-        if self.batch_count >= self.batch_size or (time.time() - self.batch_timestamp) > 2**self.time_multiplier:
+        log.debug("insert metric: %s (%s)" % (str(metric), path))
+        if not self.batch.has_key(path):
+            self.batch[path] = []
+        t = metric["TIME"] if "TIME" in metric else metric["T"]
+        v = metric["VALUE"] if "VALUE" in metric else metric["V"]
+        if "J" in metric:
+            self.batch[path].append([t, v, metric["J"]])
+        else:
+            self.batch[path].append([t, v])
+        self.batch_count += 1
+        if self.batch_count >= BATCH_SIZE or (time.time() - self.batch_timestamp) > 2**self.time_multiplier:
             self.send_batch()
             self.batch_timestamp = time.time()
 
-            gc.collect()
-            obj_sizes = {}
-            obj_refs = {}
-            objs = gc.get_objects()
-            biggest_size = 0 
-            biggest_id = None 
-            for obj in objs:
-                obj_id = id(obj)
-                obj_size = sys.getsizeof(obj)
-                obj_refs[obj_id] = obj 
-                if obj_size > biggest_size:
-                    biggest_id = obj_id
-                    biggest_size = obj_size
-            log.info("num objs: %d, biggest obj: %s, size: %d, id: %d" % (len(objs), type(obj_refs[biggest_id]), biggest_size, biggest_id))
+#            gc.collect()
+#            obj_sizes = {}
+#            obj_refs = {}
+#            objs = gc.get_objects()
+#            biggest_size = 0 
+#            biggest_id = None 
+#            for obj in objs:
+#                obj_id = id(obj)
+#                obj_size = sys.getsizeof(obj)
+#                obj_refs[obj_id] = obj 
+#                if obj_size > biggest_size:
+#                    biggest_id = obj_id
+#                    biggest_size = obj_size
+#            log.info("num objs: %d, biggest obj: %s, size: %d, id: %d" % (len(objs), type(obj_refs[biggest_id]), biggest_size, biggest_id))
 
     def send_batch(self):
         """
@@ -210,9 +206,9 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
 
         try:
             # build metrics data
-            tags = {}
             for path in self.batch.keys():
-                # ex. path: server.node6.likwid.cpu1.dpmflops
+                tags = {}
+                # ex. path: servers.node6.likwid.cpu1.dpmflops
                 pathlist = path.split(".")
                 if len(pathlist) >= 4:
                     pathlist.pop(0)
@@ -222,7 +218,8 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                     pathlist.pop(0)
                     collector = pathlist[0]
                     pathlist.pop(0)
-                    tags = {"host": host, "collector" : collector}
+                    tags["host"] = host
+                    tags["collector"] = collector
                     for p in pathlist:
                         if p.startswith("cpu"):
                             tags["cpu"] = p.replace("cpu","")
@@ -266,7 +263,9 @@ class InfluxDBMetricStore(InfluxDBStore, MetricStore):
                     else:
                         log.warn("Don't know how to handle metric with value type %s. Metric ignored!" % type(value))
             _o, e = self.write(metrics_buffer, "_" + MetricStore.group_suffix( self.group ))
-            if not e:
+            if not e or self.batch_count >= MAX_CACHE_SIZE:
+                if self.batch_count >= MAX_CACHE_SIZE:
+                    log.warn("Discarding %d metrics (check for previous failures)!" % self.batch_count)
                 self.batch = {}
                 self.batch_count = 0
                 self.time_multiplier = 1
