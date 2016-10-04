@@ -48,6 +48,7 @@ rm -rf %{buildroot}
 %{python_sitelib}/res_mngr/*
 %{_bindir}/*
 %{_unitdir}/*
+%{_sysconfdir}/*
 
 %package -n metric-store
 Summary: MetricStore abstraction layer
