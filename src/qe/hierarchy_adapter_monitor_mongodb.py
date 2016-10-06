@@ -15,6 +15,7 @@ import parsing
 
 import qe.queryengine.tokens as tokens
 import qe.queryengine.operators as ops
+from qe.queryengine.query_lexer import *
 import qe.queryengine.query_parser as query_parser
 import qe.queryengine.selector_parser as selector_parser
 
@@ -120,6 +121,12 @@ def tree_changed(hierarchy_adapter, _id, obj, *args):
 # moves this away from here ASAP!
 #
 
+class MRoot(ContainerObject):
+    ATTRIBUTES = {
+        "is_dirty": { "function": tree_changed}
+    }
+    CONTAINS_TYPES = ["MGroup"]
+
 class MGroup(ContainerObject):
     ATTRIBUTES = {
         "is_dirty": { "function": tree_changed}
@@ -148,8 +155,8 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
         user = config["user"]
         dbname = config["database"]
         passwd = config["password"]
-        self.store = MongoDBMetricStore(host_name=host, port=port, db_name=dbname, username=user, password=passwd)
-
+        #self.store = MongoDBMetricStore(host_name=host, port=port, db_name=dbname, username=user, password=passwd)
+        self.store = None
         factory = {}
         def _search_subclasses( base ):
             for c in base.__subclasses__():
@@ -324,15 +331,24 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
             return hpaths
 
         def strip_hpath(hpaths, levels=1):
+            """Strip 'levels' hpath elements on the right of each of the hpaths
+            passed as argument. I.e. return the directory of the hpaths located
+            'levels' up in the tree.
+            """
             #print "strip_hpath start: hpaths=%r" % hpaths
             for i in xrange(len(hpaths)):
-                hpath = hpaths[i].lstrip("/")
+                if hpaths[i].startswith("/"):
+                    hpath = hpaths[i][1:]
+                else:
+                    hpath = hpaths[i]
                 elems = hpath.split("/")
                 hpaths[i] = "/" + "/".join(elems[:len(elems) - levels])
             #print "strip_hpath end: hpaths=%r" % hpaths
             return hpaths
 
         def expand_tripledot(hpaths):
+            """Tripledot "..." expands to all parent paths up to root.
+            """
             new_hpaths = []
             for hpath in hpaths:
                 while hpath != "/":
@@ -379,10 +395,14 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
                 #pdb.set_trace()
                 if not el.is_filter:
                     if el.name is None:
-                        # // encountered
-                        if i == len(path.value) - 1:
-                            hpaths = ["/"]
-                        arbitrary_depth = True
+                        # / encountered
+                        if len(path.value) == 1:
+                            objs = [{"hpath": "/", "_type": "MRoot", "_id": 0}]
+                        else:
+                            # // encountered
+                            if i == len(path.value) - 1:
+                                hpaths = ["/"]
+                            arbitrary_depth = True
 
                     elif isinstance( el.name, tokens.Dot ):
                         arbitrary_depth = False
@@ -475,7 +495,7 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
                     #
                     # and now get the results!
                     #
-                    if i==len(path.value)-1:
+                    if i == len(path.value) - 1:
                         objs = resolve_hpaths(hpaths, has_regexp, cond, full=True)
                         break
                     else:
@@ -483,6 +503,7 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
                         if hpaths is None:
                             break
                     has_regexp = False
+
 
         if objs is None or hpaths is None:
             return []
@@ -498,8 +519,6 @@ if __name__ == "__main__":
     #   python hierarchy_adapter_monitor_mongodb.py select /universe/tb001/servers.tb001.cpu.cpu1.system [hpath]
     #
     
-    from qe.queryengine.query_lexer import *
-
     # testing...
     config = {"host": "localhost", "port": 27017, "user": "", "password": "",
               "database": "metricdb", "md_collection": "metric_md"}
