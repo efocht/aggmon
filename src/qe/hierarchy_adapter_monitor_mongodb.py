@@ -155,8 +155,8 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
         user = config["user"]
         dbname = config["database"]
         passwd = config["password"]
-        #self.store = MongoDBMetricStore(host_name=host, port=port, db_name=dbname, username=user, password=passwd)
-        self.store = None
+        self.store = MongoDBMetricStore(host_name=host, port=port, db_name=dbname, username=user, password=passwd)
+        #self.store = None
         factory = {}
         def _search_subclasses( base ):
             for c in base.__subclasses__():
