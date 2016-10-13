@@ -24,13 +24,15 @@ python2 -m compileall .
 
 %install
 rm -rf %{buildroot}
-install -m 755 -d %{buildroot}/%{_bindir}
 install -m 755 -d %{buildroot}/%{_unitdir}
-install -m 755 -d %{buildroot}/%{python_sitelib}
 install -m 644 aggmon.service %{buildroot}/%{_unitdir}/
+
+install -m 755 -d %{buildroot}/%{_bindir}
 for P in bin/*; do
     install -m 755 "$P" %{buildroot}/%{_bindir}/
 done
+
+install -m 755 -d %{buildroot}/%{python_sitelib}
 for D in aggmon res_mngr metric_store; do
     install -m 755 -d %{buildroot}/%{python_sitelib}/"$D"
     for P in src/"$D"/*.py*; do
@@ -38,6 +40,11 @@ for D in aggmon res_mngr metric_store; do
     done
 done
 install -m 644 src/aggmon/module-quantiles/quantiles.so %{buildroot}/%{python_sitelib}/aggmon/
+
+install -m 755 -d %{buildroot}/%{_sysconfdir}/%{name}
+for P in config.d/*; do
+    install -m 644 "$P" %{buildroot}/%{_sysconfdir}/%{name}
+done
 
 %clean
 rm -rf %{buildroot}
@@ -48,6 +55,7 @@ rm -rf %{buildroot}
 %{python_sitelib}/res_mngr/*
 %{_bindir}/*
 %{_unitdir}/*
+%{_sysconfdir}/*
 
 %package -n metric-store
 Summary: MetricStore abstraction layer
@@ -63,9 +71,3 @@ Helper classes to store metrics and job data in a database (MongoDB/TokuMX or In
 
 
 %changelog
-* Fri Jun 17 2016 NEC AJ
-- added influxdb store 
-* Thu Dec 17 2015 NEC AJ 
-- added aggmon package (yet containing qunatiles module only)
-* Thu Jul 16 2015 NEC AJ
-- initial version based on new aggmon
