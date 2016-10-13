@@ -186,16 +186,19 @@ class MongoDBMetricStore(MongoDBStore, MetricStore):
         group_name = md["CLUSTER"].split("/")[-1]
         group = {"NAME": group_name, "hpath": hpath, "_type": "MGroup"}
         spec = {"NAME": md["NAME"], "HOST": md["HOST"], "CLUSTER": md["CLUSTER"]}
+        # create the Group object, if not there, yet
         self._col_md.update( {"hpath": hpath}, {"$set": group}, upsert=True )
 
         if md["HOST"] != "":
             hpath += "/" + md["HOST"]
             host = {"NAME": md["HOST"], "hpath": hpath, "_type": "MHost"}
+            # create the Host object
             self._col_md.update( {"hpath": hpath}, {"$set": host}, upsert=True )
 
         hpath += "/" + md["NAME"]
         md["hpath"] = hpath
         md["_type"] = "MMetric"
+        # finally create the Metric object
         return self._col_md.update( {"hpath": hpath}, {"$set": md}, upsert=True )
 
     def get_md( self ):
