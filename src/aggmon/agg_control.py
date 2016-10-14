@@ -165,10 +165,10 @@ def make_timers(jobid):
     Create one timer for each aggregator config. An aggregator config can
     trigger the aggregation of multiple metrics.
     """
-    global aggregate, jagg_timers, scheduler, zmq_context
+    global config, jagg_timers, scheduler, zmq_context
 
     timers = []
-    for cfg in aggregate:
+    for cfg in config.get("aggregate"):
         if cfg["agg_class"] == "job":
             interval = cfg["interval"]
             t = RepeatEvent(scheduler, interval, do_aggregate, *[jobid, zmq_context], **cfg)
