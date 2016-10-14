@@ -14,6 +14,7 @@ import traceback
 import zmq
 from agg_component import ComponentStatesRepo, group_name, ComponentDeadError
 from agg_rpc import send_rpc, zmq_own_addr_for_uri, RPCThread, RPC_TIMEOUT, RPCNoReplyError
+from config import Config
 from scheduler import Scheduler
 from repeat_event import RepeatEvent
 from res_mngr import PBSNodes
@@ -81,156 +82,8 @@ main_stopping = False
 ##
 # default configuration data
 ##
-config = {
-    "groups": {
-    #     "/universe": {
-    #         "job_agg_nodes": ["localhost"],
-    #         "data_store_nodes" : ["localhost"],
-    #         "collector_nodes" : ["localhost"]
-    #     }
-    },
-    "services": {
-        "collector": {
-            "cwd": os.getcwd(),
-            "cmd": "agg_collector",
-            "cmd_opts": "--cmd-port %(cmdport)s --listen %(listen)s " +
-            "--group %(group_path)s --state-file %(statefile)s --dispatcher %(dispatcher)s",
-            "cmdport_range": "5100-5199",
-            "component_key": ["group", "host"],
-            "listen_port_range": "5262",
-            "logfile": "/tmp/%(service)s_%(group)s.log"
-        },
-        "data_store": {
-            "cwd": os.getcwd(),
-            "cmd": "agg_datastore",
-            "cmd_opts": "--cmd-port %(cmdport)s --listen %(listen)s " +
-            "--dbname \"%(dbname)s\" --host \"%(dbhost)s\" " +
-            "--group %(group_path)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
-            "cmdport_range": "5100-5199",
-            "component_key":  ["group", "host"],
-            "listen_port_range": "5200-5299",
-            "logfile": "/tmp/%(service)s_%(group)s.log"
-        },
-        "job_agg": {
-            "cwd": os.getcwd(),
-            "cmd": "agg_jobagg",
-            "cmd_opts": "--cmd-port %(cmdport)s --listen %(listen)s --log debug " +
-            "--jobid %(jobid)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
-            "cmdport_range": "5000-5999",
-            "component_key":  ["jobid"],
-            "listen_port_range": "5300-5999",
-            "logfile": "/tmp/%(service)s_%(jobid)s.log",
-            "min_nodes": 4
-        }
-    },
-    "database": {
-        "dbname": "metricdb",
-        "jobdbname": "metric",
-        "dbhost": "localhost:27017",
-        "user": "",
-        "password": ""
-    },
-    "resource_manager": {
-        "type": "pbs",
-        "master": "",
-        "ssh_port": 22,
-        "pull_state_cmd": ""
-    },
-    "global": {
-        "local_cmd"  : "cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &",
-        "remote_cmd" : "ssh %(host)s \"cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &\"",
-        "remote_kill": "ssh %(host)s kill %(pid)d",
-        "remote_status": "ssh %(host)s \"ps --pid %(pid)d -o pid,wchan,cmd,args -ww | tail -1\""
-    }
-}
+config = {}
 
-# default aggregation config
-# cmd : "agg"
-# metric : metric that should be aggregated
-# agg_metric : aggregated metric name
-# push_target : where to push the aggregated metric to. Can be the agg_collector
-#               of the own group or one on a higher level or the data store.
-# agg_type : aggregation type, i.e. min, max, avg, sum, worst, quant10
-# ttl : (optional) time to live for metrics, should filter out old/expired metrics
-# args ... : space for further aggregator specific arguments
-aggregate = {}
-
-
-def load_config( config_file ):
-
-    global config, aggregate
-
-    try:
-        import yaml
-    except ImportError:
-        print("Cannot find python module yaml")
-        sys.exit(1)
-
-    files = []
-    if os.path.isdir(config_file):
-        for f in os.listdir(config_file):
-            path = os.path.join(config_file, f)
-            if os.path.isfile(path):
-                files.append(path)
-    else:
-        files = (config_file,)
-
-    templates = {}
-    aggregate = []
-
-    for f in files:
-        result = yaml.safe_load(open(f))
-        cf = result.get("config", None)
-        if cf is not None:
-            groups = cf.get("groups", None)
-            if isinstance(groups, dict):
-                config["groups"].update(groups)
-            services = cf.get("services", None)
-            if isinstance(services, dict):
-                obj = services.get("collector", None)
-                if isinstance(obj, dict):
-                    config["services"]["collector"].update(obj)
-                obj = services.get("data_store", None)
-                if isinstance(obj, dict):
-                    config["services"]["data_store"].update(obj)
-                obj = services.get("job_agg", None)
-                if isinstance(obj, dict):
-                    config["services"]["job_agg"].update(obj)
-            database = cf.get("database", None)
-            if isinstance(database, dict):
-                config["database"].update(database)
-            resource_manager = cf.get("resource_manager", None)
-            if isinstance(resource_manager, dict):
-                config["resource_manager"].update(resource_manager)
-            glob = cf.get("global", None)
-            if isinstance(glob, dict):
-                config["global"].update(glob)
-
-        tpl = result.get("agg-templates", None)
-        if isinstance(tpl, dict):
-            templates.update(tpl)
-
-        agg = result.get("agg", None)
-        if isinstance(agg, list):
-            for a in agg:
-                if isinstance(a, dict):
-                    aggregate.append(a)
-
-    for agg in aggregate:
-        tpl_names = agg.get("template", None)
-        if tpl_names is None:
-            continue
-        del agg["template"]
-        if not isinstance(tpl_names, list):
-            tpl_names = (tpl_names,)
-        orig_attrs = agg.copy()
-        agg.clear()
-        for tpl_name in tpl_names:
-            tpl = templates.get(tpl_name, None)
-            if tpl is None:
-                raise Exception("Template '%s' used in config file '%s' is not known." % (tpl_name, f))
-            agg.update(tpl)
-        agg.update(orig_attrs)
 
 def create_pidfile(fname):
     try:
@@ -263,7 +116,7 @@ def get_job_agg_port(jobid):
 
 def get_top_level_group():
     global config
-    for group_path in config["groups"].keys():
+    for group_path in config.get("groups").keys():
         if group_path.count("/") == 1:
             return group_path
 
@@ -409,7 +262,7 @@ def relay_to_collectors(context, cmd, msg):
     if cmd == "add_tag" and msg["TAG_KEY"] == "J":
         jobid = msg["TAG_VALUE"]
         nhosts = msg_tag_num_hosts(msg)
-        if nhosts >= config["services"]["job_agg"]["min_nodes"]:
+        if nhosts >= config.get("services","job_agg", "min_nodes"):
             create_job_agg_instance(jobid)
     elif cmd == "remove_tag" and msg["TAG_KEY"] == "J":
         jobid = msg["TAG_VALUE"]
@@ -437,7 +290,7 @@ def check_restart_collectors(config, component_states):
     #
     num_collectors = 0
     coll_started = []
-    for group_path in config["groups"]:
+    for group_path in config.get("groups"):
         group = group_name(group_path)
         pub = component_states.get_state({"component": "collector", "group": group_path})
         if pub == {} or "outdated!" in pub:
@@ -455,7 +308,7 @@ def check_restart_data_stores(config, component_states):
     # Handle data stores
     #
     msgbus_arr = ["--msgbus %s" % cmd_port for cmd_port in get_collectors_cmd_ports()]
-    for group_path in config["groups"]:
+    for group_path in config.get("groups"):
         group = group_name(group_path)
         mong = component_states.get_state({"component": "data_store", "group": group_path})
         if mong == {} or "outdated!" in mong:
@@ -472,9 +325,9 @@ def check_restart_data_stores(config, component_states):
 def get_job_list(config):
     from res_mngr import PBSNodes
     # TODO: where do we get host/port from?
-    pbs = PBSNodes(host=config["resource_manager"]["master"],
-                   port=config["resource_manager"]["ssh_port"],
-                   pull_state_cmd=config["resource_manager"]["pull_state_cmd"])
+    pbs = PBSNodes(host=config.get("resource_manager", "master"),
+                   port=config.get("resource_manager", "ssh_port"),
+                   pull_state_cmd=config.get("resource_manager", "pull_state_cmd"))
     pbs.update()
     return pbs.job_nodes
     #return set(pbs.job_nodes.keys())
@@ -504,7 +357,7 @@ def component_control():
     # get list of outdated components
     outdated = component_states.check_outdated()
 
-    num_groups = len(config["groups"])
+    num_groups = len(config.get("groups"))
     # restart collectors, if needed
     collector_states = component_states.get_state({"component": "collector"})
     coll_started = []
@@ -546,7 +399,7 @@ def component_control():
         remove_job_agg_instance(jobid)
         if jobid in fresh_joblist:
             # start it
-            if len(fresh_job_nodes[jobid]) >= config["services"]["job_agg"]["min_nodes"]:
+            if len(fresh_job_nodes[jobid]) >= config.get("services", "job_agg", "min_nodes"):
                 create_job_agg_instance(jobid)
                 outdated_but_running.add(jobid)
         else:
@@ -610,7 +463,7 @@ def component_control():
         jagg = component_states.get_state({"component": "job_agg", "jobid": jobid})
         if jagg is None or len(jagg) == 0:
             # TODO: check if we create duplicate instances here!!!
-            if len(jnodes) >= config["services"]["job_agg"]["min_nodes"]:
+            if len(jnodes) >= config.get("services", "job_agg", "min_nodes"):
                 create_job_agg_instance(jobid)
         else:
             cmd_to_collectors(zmq_context, "subscribe", {"J": jobid,
@@ -630,7 +483,7 @@ def sig_handler(signum, stack):
 
 def aggmon_control(argv):
 
-    global component_states, scheduler, zmq_context, me_rpc, job_list, main_stopping
+    global component_states, scheduler, zmq_context, me_rpc, job_list, main_stopping, config
     
     ap = argparse.ArgumentParser()
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5558", action="store", help="RPC command port")
@@ -652,9 +505,9 @@ def aggmon_control(argv):
 
     log.info("agg_control called with pargs: %r" % pargs)
 
-    load_config(pargs.config)
+    config = Config(config_dir=pargs.config)
 
-    if len(config["resource_manager"]["master"]) == 0:
+    if len(config.get("resource_manager","master")) == 0:
         log.error("No master node specified for the resource manager! Exitting!")
         sys.exit(1)
 

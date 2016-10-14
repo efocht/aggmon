@@ -124,24 +124,24 @@ class ComponentStatesRepo(object):
     def start_component(self, service, group_path, __CALLBACK=None, __CALLBACK_ARGS=[], **kwds):
         """
         """
-        if group_path not in self.config["groups"]:
+        if group_path not in self.config.get("groups"):
             log.error("start_component: group '%s' not found in configuration!" % group_path)
             return False
-        if service not in self.config["services"]:
+        if service not in self.config.get("services"):
             log.error("start_component: service '%s' not found in configuration!" % service)
             return False
         group = group_name(group_path)
         nodes_key = "%s_nodes" % service
-        if nodes_key not in self.config["groups"][group_path]:
+        if nodes_key not in self.config.get("groups", group_path):
             log.error("start_component: '%s' not found in configuration of group '%s'!" % (nodes_key, group_path))
             return False
-        nodes = self.config["groups"][group_path][nodes_key]
+        nodes = self.config.get("groups", group_path, nodes_key)
         assert(isinstance(nodes, list))
         locals().update(kwds)
-        if "database" in self.config:
-            if isinstance(self.config["database"], dict):
-                locals().update(self.config["database"])
-        svc_info = self.config["services"][service]
+        if "database" in self.config.get():
+            if isinstance(self.config.get("database"), dict):
+                locals().update(self.config.get("database"))
+        svc_info = self.config.get("services", service)
         cwd = svc_info["cwd"]
         cmd = svc_info["cmd"]
         cmd_opts = svc_info["cmd_opts"]
@@ -154,14 +154,14 @@ class ComponentStatesRepo(object):
         state_file = "/tmp/state_%(service)s_%(group)s" % locals()
         # register callback
         if __CALLBACK is not None:
-            key = service + ":" + component_key(self.config["services"][service]["component_key"], kwds)
+            key = service + ":" + component_key(self.config.get("services", service, "component_key"), kwds)
             self.component_start_cb[key] = {"cb": __CALLBACK, "args": __CALLBACK_ARGS}
         for host in nodes:
             try:
                 cmd = which(cmd)
                 cmd_opts = cmd_opts % locals()
                 cmd = cmd + " " + cmd_opts
-                exec_cmd = self.config["global"]["remote_cmd"] % locals()
+                exec_cmd = self.config.get("global", "remote_cmd") % locals()
                 log.info("starting subprocess: %s" % exec_cmd)
                 out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
                 log.info("output: %s" % out)
@@ -191,7 +191,7 @@ class ComponentStatesRepo(object):
             return False
         # register callback
         if __CALLBACK is not None:
-            key = service + ":" + component_key(self.config["services"][service]["component_key"], kwds)
+            key = service + ":" + component_key(self.config.get("services", service, "component_key"), kwds)
             self.component_kill_cb[key] = {"cb": __CALLBACK, "args": __CALLBACK_ARGS}
         if "cmd_port" not in state:
             log.error("cmd_port not found in state: %r" % state)
@@ -237,7 +237,7 @@ class ComponentStatesRepo(object):
             res = True
             try:
                 log.info("attempting hard-kill of pid %d" % state["pid"])
-                exec_cmd = self.config["global"]["remote_kill"] % state
+                exec_cmd = self.config.get("global", "remote_kill") % state
                 out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
                 #send_rpc(self.zmq_context, self.dispatcher, "del_component_state", **msg)
                 log.debug("kill_component (kill) res=%r" % res)
@@ -250,7 +250,7 @@ class ComponentStatesRepo(object):
 
 
     def kill_components(self, component_types):
-        for group_path in self.config["groups"].keys():
+        for group_path in self.config.get("groups").keys():
             for comp_type in component_types:
                 c = self.get_state({"component": comp_type, "group": group_path})
                 if c is not None:
@@ -276,7 +276,7 @@ class ComponentStatesRepo(object):
             pid = component_state["pid"]
             host = component_state["host"]
             service = component_state["component"].replace("_", "")
-            exec_cmd = self.config["global"]["remote_status"] % locals()
+            exec_cmd = self.config.get("global", "remote_status") % locals()
             log.info("starting subprocess: %s" % exec_cmd)
             out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
             log.info("output: '%s'" % out)
@@ -305,7 +305,7 @@ class ComponentStatesRepo(object):
         if component not in self.repo:
             self.repo[component] = {}
         # now make a meaningful minimal unique key
-        key = component_key(self.config["services"][component]["component_key"], msg)
+        key = component_key(self.config.get("services", component, "component_key"), msg)
         started = None
         starting = False
         if key in self.repo[component]:
@@ -343,7 +343,7 @@ class ComponentStatesRepo(object):
         component = msg["component"]
         if component not in self.repo:
             return {}
-        key = component_key(self.config["services"][component]["component_key"], msg)
+        key = component_key(self.config.get("services", component, "component_key"), msg)
         if len(key) > 0:
             if key in self.repo[component]:
                 return self.repo[component][key]
@@ -368,7 +368,7 @@ class ComponentStatesRepo(object):
         if component not in self.repo:
             log.error("del_state: component '%s' not in msg %r" % (component, msg))
             return False
-        key = component_key(self.config["services"][component]["component_key"], msg)
+        key = component_key(self.config.get("services", component, "component_key"), msg)
         if len(key) > 0:
             fullkey = None
             if key in self.repo[component]:
