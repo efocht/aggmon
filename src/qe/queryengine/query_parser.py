@@ -160,9 +160,9 @@ class Query(parsing.Nonterm):
         "%reduce SquareOpen QueryList SquareClose Path"
         self.value = ( queries, path )
     def __repr__( self ):
-        if isinstance(self.value,RIDList):
+        if isinstance(self.value, OIDList):
             return '[' + repr(self.value) + ']'
-        if isinstance(self.value,QueryList):
+        if isinstance(self.value, QueryList):
             return '[' + repr(self.value) + ']'
         else:
             return repr(self.value)

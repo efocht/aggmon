@@ -261,6 +261,7 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
         clname = obj["_type"]
         res = {}
         if not strictly_selected:
+            # following attributes are always included, except when 'strictly_selected' is True
             res = { "_id": self.rid_to_oid( obj["_id"] ), "_type": clname }
         c = self.factory[clname]
         clmd = c.ATTRIBUTES
@@ -290,36 +291,37 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
 
     def _do_query( self, query ):
         ( id_list, path ) = query
-        #print id_list, path
+        #print "_do_query: id_list=%r, path=%r" % (id_list, path)
+        objs = []
+        hpaths = []
         find = None
         if id_list is not None:
             if isinstance( id_list, query_parser.OIDList ):
-                if len(id_list.value) == 1:
-                    find = {"_id": id_list.value[0].value}
-                else:
-                    find = {"_id": {"$in": [i.value for i in id_list.value]}}
+                find = {"_id": {"$in": [self.oid_to_rid(i.value) for i in id_list.value]}}
             else:
                 # This is a list of hpaths or query expressions
-                objs = []
                 for q in id_list.value:
                     objs.extend( self._do_query( q.value ) )
                 if path is None:
                     return objs
-                # TODO: or not?
-                if len(objs) == 1:
-                    find = {"_id": objs[0]["_id"]}
                 else:
-                    ids_list = [ obj["_id"] for obj in objs ]
-                    find = {"_id": {"$in": ids_list}}
+                    # TODO: or not?
+                    # When does this case occur?
+                    hpaths_list = [ self.oid_to_rid(obj["hpath"]) for obj in objs ]
+                    find = {"hpath": {"$in": hpaths_list}}
 
-        objs = []
-        hpaths = []
         if find is not None:
             if path is None:
-                return self.store.find_md( find )
-            # TODO: don't use collection here... but not so urgent
-            hpaths = self.store._col_md.distinct("hpath", query=find)
+                objs = self.store.find_md( find )
+            else:
+                # TODO: don't use collection here... but not so urgent
+                # WHAT IS THIS NEEDED FOR?
+                print "DISTINCT called!? path=%r, find=%r" % (path, find)
+                hpaths = self.store._col_md.distinct("hpath", query=find)
 
+        ##
+        ## internal functions
+        ##
         def append_hpath(hpaths, data):
             #print "append_hpath start: data=%r, hpaths=%r" % (data, hpaths)
             if len(hpaths) == 0:
@@ -510,7 +512,9 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
         if len(objs) == 0 and len(hpaths) > 0:
             objs = resolve_hpaths(hpaths, has_regexp, {}, full=True)
         #pdb.set_trace()
-        return [obj for obj in objs]
+        if not isinstance(objs, list):
+            objs = [obj for obj in objs]
+        return objs
 
 
 if __name__ == "__main__":
