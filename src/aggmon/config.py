@@ -177,15 +177,30 @@ class Config(object):
             for tpl_name in tpl_names:
                 tpl = templates.get(tpl_name, None)
                 if tpl is None:
-                    raise Exception("Template '%s' used in config file '%s' is not known." % (tpl_name, f))
+                    raise Exception("Template '%s' used in config file '%s' is not known." %
+                                    (tpl_name, f))
                 agg.update(tpl)
             agg.update(orig_attrs)
     
         self._conf["aggregate"] = aggregate
 
-    def get(self, *path):
+    def geta(self, *path):
         d = self._config
         for k in path:
+            if k in d:
+                d = d[k]
+                if d is None:
+                    break
+        return d
+
+    def get(self, path):
+        """Get value in the config nested dicts, represent the "path" to the value
+        like a file system path. Each element is a key.
+        """
+        if not path.startswith("/"):
+            raise 
+        d = self._config
+        for k in path.split("/")[1:]:
             if k in d:
                 d = d[k]
                 if d is None:

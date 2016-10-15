@@ -116,7 +116,7 @@ def get_job_agg_port(jobid):
 
 def get_top_level_group():
     global config
-    for group_path in config.get("groups").keys():
+    for group_path in config.get("/groups").keys():
         if group_path.count("/") == 1:
             return group_path
 
@@ -168,7 +168,7 @@ def make_timers(jobid):
     global config, jagg_timers, scheduler, zmq_context
 
     timers = []
-    for cfg in config.get("aggregate"):
+    for cfg in config.get("/aggregate"):
         if cfg["agg_class"] == "job":
             interval = cfg["interval"]
             t = RepeatEvent(scheduler, interval, do_aggregate, *[jobid, zmq_context], **cfg)
@@ -262,7 +262,7 @@ def relay_to_collectors(context, cmd, msg):
     if cmd == "add_tag" and msg["TAG_KEY"] == "J":
         jobid = msg["TAG_VALUE"]
         nhosts = msg_tag_num_hosts(msg)
-        if nhosts >= config.get("services","job_agg", "min_nodes"):
+        if nhosts >= config.get("/services/job_agg/min_nodes"):
             create_job_agg_instance(jobid)
     elif cmd == "remove_tag" and msg["TAG_KEY"] == "J":
         jobid = msg["TAG_VALUE"]
@@ -290,7 +290,7 @@ def check_restart_collectors(config, component_states):
     #
     num_collectors = 0
     coll_started = []
-    for group_path in config.get("groups"):
+    for group_path in config.get("/groups"):
         group = group_name(group_path)
         pub = component_states.get_state({"component": "collector", "group": group_path})
         if pub == {} or "outdated!" in pub:
@@ -308,7 +308,7 @@ def check_restart_data_stores(config, component_states):
     # Handle data stores
     #
     msgbus_arr = ["--msgbus %s" % cmd_port for cmd_port in get_collectors_cmd_ports()]
-    for group_path in config.get("groups"):
+    for group_path in config.get("/groups"):
         group = group_name(group_path)
         mong = component_states.get_state({"component": "data_store", "group": group_path})
         if mong == {} or "outdated!" in mong:
@@ -325,9 +325,9 @@ def check_restart_data_stores(config, component_states):
 def get_job_list(config):
     from res_mngr import PBSNodes
     # TODO: where do we get host/port from?
-    pbs = PBSNodes(host=config.get("resource_manager", "master"),
-                   port=config.get("resource_manager", "ssh_port"),
-                   pull_state_cmd=config.get("resource_manager", "pull_state_cmd"))
+    pbs = PBSNodes(host=config.get("/resource_manager/master"),
+                   port=config.get("/resource_manager/ssh_port"),
+                   pull_state_cmd=config.get("/resource_manager/pull_state_cmd"))
     pbs.update()
     return pbs.job_nodes
     #return set(pbs.job_nodes.keys())
@@ -357,7 +357,7 @@ def component_control():
     # get list of outdated components
     outdated = component_states.check_outdated()
 
-    num_groups = len(config.get("groups"))
+    num_groups = len(config.get("/groups"))
     # restart collectors, if needed
     collector_states = component_states.get_state({"component": "collector"})
     coll_started = []
@@ -399,7 +399,7 @@ def component_control():
         remove_job_agg_instance(jobid)
         if jobid in fresh_joblist:
             # start it
-            if len(fresh_job_nodes[jobid]) >= config.get("services", "job_agg", "min_nodes"):
+            if len(fresh_job_nodes[jobid]) >= config.get("/services/job_agg/min_nodes"):
                 create_job_agg_instance(jobid)
                 outdated_but_running.add(jobid)
         else:
@@ -463,7 +463,7 @@ def component_control():
         jagg = component_states.get_state({"component": "job_agg", "jobid": jobid})
         if jagg is None or len(jagg) == 0:
             # TODO: check if we create duplicate instances here!!!
-            if len(jnodes) >= config.get("services", "job_agg", "min_nodes"):
+            if len(jnodes) >= config.get("/services/job_agg/min_nodes"):
                 create_job_agg_instance(jobid)
         else:
             cmd_to_collectors(zmq_context, "subscribe", {"J": jobid,
@@ -507,7 +507,7 @@ def aggmon_control(argv):
 
     config = Config(config_dir=pargs.config)
 
-    if len(config.get("resource_manager","master")) == 0:
+    if len(config.get("/resource_manager/master")) == 0:
         log.error("No master node specified for the resource manager! Exitting!")
         sys.exit(1)
 
