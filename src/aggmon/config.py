@@ -198,7 +198,7 @@ class Config(object):
         like a file system path. Each element is a key.
         """
         if not path.startswith("/"):
-            raise 
+            raise Exception("path '%s' does not start with /" % path)
         d = self._config
         for k in path.split("/")[1:]:
             if k in d:
