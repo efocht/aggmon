@@ -138,7 +138,7 @@ class ComponentStatesRepo(object):
         nodes = self.config.get("/groups/%s/%s" % (group_path, nodes_key))
         assert(isinstance(nodes, list))
         locals().update(kwds)
-        if "database" in self.config.get():
+        if "database" in self.config.get("/"):
             if isinstance(self.config.get("/database"), dict):
                 locals().update(self.config.get("/database"))
         svc_info = self.config.get("/services/%s" % service)

@@ -1,6 +1,6 @@
 config:
     groups:
-        /universe:
+        universe:
             job_agg_nodes:    [localhost]
             data_store_nodes: [localhost]
             collector_nodes:  [localhost]

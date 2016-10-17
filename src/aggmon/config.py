@@ -17,7 +17,7 @@ log = logging.getLogger( __name__ )
 ##
 DEFAULT_CONFIG = {
     "groups": {
-    #     "/universe": {
+    #     "universe": {
     #         "job_agg_nodes": ["localhost"],
     #         "data_store_nodes" : ["localhost"],
     #         "collector_nodes" : ["localhost"]
@@ -182,7 +182,7 @@ class Config(object):
                 agg.update(tpl)
             agg.update(orig_attrs)
     
-        self._conf["aggregate"] = aggregate
+        self._config["aggregate"] = aggregate
 
     def geta(self, *path):
         d = self._config
@@ -205,5 +205,6 @@ class Config(object):
                 d = d[k]
                 if d is None:
                     break
+        log.debug("Config.get path=%s v=%r" % (path, d))
         return d
 
