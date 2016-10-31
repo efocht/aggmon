@@ -204,8 +204,8 @@ class MongoDBMetricStore(MongoDBStore, MetricStore):
     def get_md( self ):
         return self.find_md( match={"CLUSTER": self.group} )
 
-    def find_md( self, match=None, proj=None ):
-        return self._col_md.find( match, proj )
+    def find_md( self, match=None, projection=None ):
+        return self._col_md.find( match, projection=projection )
 
     def last_md( self ):
         return self._col_md.find().skip(self._col_md.count() - 1)
@@ -273,8 +273,8 @@ class MongoDBMetricStore(MongoDBStore, MetricStore):
             self.v_cache.set(val["H"], val["N"], val["T"])
 
 
-    def find_val( self, match=None, proj=None, sort=None, limit=0 ):
-        return self._col_val.find( match, projection=proj, limit=limit, sort=sort )
+    def find_val( self, match=None, projection=None, sort=None, limit=0 ):
+        return self._col_val.find( match, projection=projection, limit=limit, sort=sort )
 
 
     def drop_all( self ):
@@ -308,7 +308,7 @@ class MongoDBMetricStore(MongoDBStore, MetricStore):
         match = {"$and": [{"H": host_name}, {"N": metric_name}, {"T": {"$gt": start_s, "$lt": end_s}}]}
         proj = {"T": True, "V": True}
         try:
-            records = [[r["T"], r["V"]] for r in self._col_val.find( match, proj=proj )]
+            records = [[r["T"], r["V"]] for r in self._col_val.find( match, projection=proj )]
         except Exception, e:
             raise Exception("Query failed, %s" % str( e ))
         return records
@@ -411,8 +411,8 @@ class MongoDBJobStore(MongoDBStore):
         return self._col.update( {"name": metric["name"], "value": metric["value"]}, metric, upsert=True )
 
 
-    def find( self, match=None, proj=None ):
-        return self._col.find( match, proj )
+    def find( self, match=None, projection=None ):
+        return self._col.find( match, projection )
 
 
     def drop_all( self ):
@@ -451,8 +451,8 @@ class MongoDBStatusStore(MongoDBStore):
                                  upsert=True )
 
 
-    def find( self, match=None, proj=None ):
-        return self._col.find( match, proj )
+    def find( self, match=None, projection=None ):
+        return self._col.find( match, projection=projection )
 
 
     def drop_all( self ):
