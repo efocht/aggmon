@@ -367,17 +367,17 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
                 proj = {"hpath": True}
             if not has_regexp:
                 if condition:
-                    objs = self.store.find_md({"$and": [condition, {"hpath": {"$in": hpaths}}]}, proj)
+                    objs = self.store.find_md({"$and": [condition, {"hpath": {"$in": hpaths}}]}, projection=proj)
                 else:
-                    objs = self.store.find_md({"hpath": {"$in": hpaths}}, proj)
+                    objs = self.store.find_md({"hpath": {"$in": hpaths}}, projection=proj)
             else:
                 ors = []
                 for hpath in hpaths:
                     ors.append({"hpath": {"$regex": "^" + hpath + "$"}})
                 if condition:
-                    objs = self.store.find_md({"$and": [condition, {"$or": ors}]}, proj)
+                    objs = self.store.find_md({"$and": [condition, {"$or": ors}]}, projection=proj)
                 else:
-                    objs = self.store.find_md({"$or": ors}, proj)
+                    objs = self.store.find_md({"$or": ors}, projection=proj)
             #print "resolve_hpaths end: _Cursor__spec: %r" % objs._Cursor__spec
             if objs.count() == 0:
                 return None
