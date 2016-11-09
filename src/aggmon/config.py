@@ -10,7 +10,7 @@ import traceback
 
 
 log = logging.getLogger( __name__ )
-
+DEFAULT_CONFIG_DIR = "../config.d"
 
 ##
 # default configuration data

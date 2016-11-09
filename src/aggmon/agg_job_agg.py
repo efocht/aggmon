@@ -18,6 +18,7 @@ from agg_component import get_kwds, ComponentState
 from agg_mcache import MCache
 from agg_rpc import *
 import basic_aggregators as aggs
+from config import Config, DEFAULT_CONFIG_DIR
 
 
 log = logging.getLogger( __name__ )
@@ -188,6 +189,7 @@ def aggmon_jobagg(argv):
     global component
 
     ap = argparse.ArgumentParser()
+    ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR, action="store", help="configuration directory")
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5501", action="store", help="RPC command port")
     ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
     ap.add_argument('-j', '--jobid', default="", action="store", help="jobid for which this instance does aggregation")
@@ -203,6 +205,8 @@ def aggmon_jobagg(argv):
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
     component = None
+
+    config = Config(config_dir=pargs.config)
 
     if len(pargs.jobid) == 0:
         log.error("jobid argument can not be empty!")

@@ -16,6 +16,7 @@ import zmq
 from Queue import Queue, Empty
 from agg_component import get_kwds, ComponentState
 from agg_rpc import *
+from config import Config, DEFAULT_CONFIG_DIR
 # Path Fix
 sys.path.append(
     os.path.abspath(
@@ -83,6 +84,7 @@ def aggmon_data_store(argv):
 
     ap = argparse.ArgumentParser()
     ap.add_argument('-g', '--group', default="universe", action="store", help="group/cluster served by this daemon instance")
+    ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR, action="store", help="configuration directory")
     ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5511", action="store", help="RPC command port")
     ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
     ap.add_argument('-e', '--expire', default=180, action="store", help="days for expiring value metrics")
@@ -104,6 +106,8 @@ def aggmon_data_store(argv):
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
+
+    config = Config(config_dir=pargs.config)
 
     pargs.backend = pargs.backend.split(",")
     if pargs.port:

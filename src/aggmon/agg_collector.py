@@ -28,6 +28,7 @@ from Queue import Queue, Empty
 from agg_component import get_kwds, ComponentState
 from msg_tagger import MsgTagger
 from agg_rpc import *
+from config import Config, DEFAULT_CONFIG_DIR
 
 
 log = logging.getLogger( __name__ )
@@ -315,6 +316,7 @@ def aggmon_collector(argv):
     global component
 
     ap = argparse.ArgumentParser()
+    ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR, action="store", help="configuration directory")
     ap.add_argument('-C', '--cmd-port', default="tcp://127.0.0.1:5556", action="store", help="RPC command port")
     ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
     ap.add_argument('-g', '--group', default="universe", action="store", help="group for this message bus. Default: /universe")
@@ -329,6 +331,8 @@ def aggmon_collector(argv):
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
+
+    config = Config(config_dir=pargs.config)
 
     state = []
     subs = {}
