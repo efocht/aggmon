@@ -353,6 +353,7 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
             """
             new_hpaths = []
             for hpath in hpaths:
+                new_hpaths.append(hpath)
                 while hpath != "/":
                     hpath = strip_hpath([hpath])[0]
                     new_hpaths.append(hpath)
