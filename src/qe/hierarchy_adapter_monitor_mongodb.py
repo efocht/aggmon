@@ -15,6 +15,7 @@ import parsing
 
 import qe.queryengine.tokens as tokens
 import qe.queryengine.operators as ops
+from qe.queryengine.query_lexer import *
 import qe.queryengine.query_parser as query_parser
 import qe.queryengine.selector_parser as selector_parser
 
@@ -120,6 +121,12 @@ def tree_changed(hierarchy_adapter, _id, obj, *args):
 # moves this away from here ASAP!
 #
 
+class MRoot(ContainerObject):
+    ATTRIBUTES = {
+        "is_dirty": { "function": tree_changed}
+    }
+    CONTAINS_TYPES = ["MGroup"]
+
 class MGroup(ContainerObject):
     ATTRIBUTES = {
         "is_dirty": { "function": tree_changed}
@@ -149,7 +156,7 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
         dbname = config["database"]
         passwd = config["password"]
         self.store = MongoDBMetricStore(host_name=host, port=port, db_name=dbname, username=user, password=passwd)
-
+        #self.store = None
         factory = {}
         def _search_subclasses( base ):
             for c in base.__subclasses__():
@@ -254,6 +261,7 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
         clname = obj["_type"]
         res = {}
         if not strictly_selected:
+            # following attributes are always included, except when 'strictly_selected' is True
             res = { "_id": self.rid_to_oid( obj["_id"] ), "_type": clname }
         c = self.factory[clname]
         clmd = c.ATTRIBUTES
@@ -283,36 +291,37 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
 
     def _do_query( self, query ):
         ( id_list, path ) = query
-        #print id_list, path
+        #print "_do_query: id_list=%r, path=%r" % (id_list, path)
+        objs = []
+        hpaths = []
         find = None
         if id_list is not None:
             if isinstance( id_list, query_parser.OIDList ):
-                if len(id_list.value) == 1:
-                    find = {"_id": id_list.value[0].value}
-                else:
-                    find = {"_id": {"$in": [i.value for i in id_list.value]}}
+                find = {"_id": {"$in": [self.oid_to_rid(i.value) for i in id_list.value]}}
             else:
                 # This is a list of hpaths or query expressions
-                objs = []
                 for q in id_list.value:
                     objs.extend( self._do_query( q.value ) )
                 if path is None:
                     return objs
-                # TODO: or not?
-                if len(objs) == 1:
-                    find = {"_id": objs[0]["_id"]}
                 else:
-                    ids_list = [ obj["_id"] for obj in objs ]
-                    find = {"_id": {"$in": ids_list}}
+                    # TODO: or not?
+                    # When does this case occur?
+                    hpaths_list = [ self.oid_to_rid(obj["hpath"]) for obj in objs ]
+                    find = {"hpath": {"$in": hpaths_list}}
 
-        objs = []
-        hpaths = []
         if find is not None:
             if path is None:
-                return self.store.find_md( find )
-            # TODO: don't use collection here... but not so urgent
-            hpaths = self.store._col_md.distinct("hpath", query=find)
+                objs = self.store.find_md( find )
+            else:
+                # TODO: don't use collection here... but not so urgent
+                # WHAT IS THIS NEEDED FOR?
+                print "DISTINCT called!? path=%r, find=%r" % (path, find)
+                hpaths = self.store._col_md.distinct("hpath", query=find)
 
+        ##
+        ## internal functions
+        ##
         def append_hpath(hpaths, data):
             #print "append_hpath start: data=%r, hpaths=%r" % (data, hpaths)
             if len(hpaths) == 0:
@@ -324,17 +333,27 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
             return hpaths
 
         def strip_hpath(hpaths, levels=1):
+            """Strip 'levels' hpath elements on the right of each of the hpaths
+            passed as argument. I.e. return the directory of the hpaths located
+            'levels' up in the tree.
+            """
             #print "strip_hpath start: hpaths=%r" % hpaths
             for i in xrange(len(hpaths)):
-                hpath = hpaths[i].lstrip("/")
+                if hpaths[i].startswith("/"):
+                    hpath = hpaths[i][1:]
+                else:
+                    hpath = hpaths[i]
                 elems = hpath.split("/")
                 hpaths[i] = "/" + "/".join(elems[:len(elems) - levels])
             #print "strip_hpath end: hpaths=%r" % hpaths
             return hpaths
 
         def expand_tripledot(hpaths):
+            """Tripledot "..." expands to all parent paths up to root.
+            """
             new_hpaths = []
             for hpath in hpaths:
+                new_hpaths.append(hpath)
                 while hpath != "/":
                     hpath = strip_hpath([hpath])[0]
                     new_hpaths.append(hpath)
@@ -349,17 +368,17 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
                 proj = {"hpath": True}
             if not has_regexp:
                 if condition:
-                    objs = self.store.find_md({"$and": [condition, {"hpath": {"$in": hpaths}}]}, proj)
+                    objs = self.store.find_md({"$and": [condition, {"hpath": {"$in": hpaths}}]}, projection=proj)
                 else:
-                    objs = self.store.find_md({"hpath": {"$in": hpaths}}, proj)
+                    objs = self.store.find_md({"hpath": {"$in": hpaths}}, projection=proj)
             else:
                 ors = []
                 for hpath in hpaths:
                     ors.append({"hpath": {"$regex": "^" + hpath + "$"}})
                 if condition:
-                    objs = self.store.find_md({"$and": [condition, {"$or": ors}]}, proj)
+                    objs = self.store.find_md({"$and": [condition, {"$or": ors}]}, projection=proj)
                 else:
-                    objs = self.store.find_md({"$or": ors}, proj)
+                    objs = self.store.find_md({"$or": ors}, projection=proj)
             #print "resolve_hpaths end: _Cursor__spec: %r" % objs._Cursor__spec
             if objs.count() == 0:
                 return None
@@ -379,10 +398,14 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
                 #pdb.set_trace()
                 if not el.is_filter:
                     if el.name is None:
-                        # // encountered
-                        if i == len(path.value) - 1:
-                            hpaths = ["/"]
-                        arbitrary_depth = True
+                        # / encountered
+                        if len(path.value) == 1:
+                            objs = [{"hpath": "/", "_type": "MRoot", "_id": 0}]
+                        else:
+                            # // encountered
+                            if i == len(path.value) - 1:
+                                hpaths = ["/"]
+                            arbitrary_depth = True
 
                     elif isinstance( el.name, tokens.Dot ):
                         arbitrary_depth = False
@@ -475,7 +498,7 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
                     #
                     # and now get the results!
                     #
-                    if i==len(path.value)-1:
+                    if i == len(path.value) - 1:
                         objs = resolve_hpaths(hpaths, has_regexp, cond, full=True)
                         break
                     else:
@@ -484,12 +507,15 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
                             break
                     has_regexp = False
 
+
         if objs is None or hpaths is None:
             return []
         if len(objs) == 0 and len(hpaths) > 0:
             objs = resolve_hpaths(hpaths, has_regexp, {}, full=True)
         #pdb.set_trace()
-        return [obj for obj in objs]
+        if not isinstance(objs, list):
+            objs = [obj for obj in objs]
+        return objs
 
 
 if __name__ == "__main__":
@@ -498,8 +524,6 @@ if __name__ == "__main__":
     #   python hierarchy_adapter_monitor_mongodb.py select /universe/tb001/servers.tb001.cpu.cpu1.system [hpath]
     #
     
-    from qe.queryengine.query_lexer import *
-
     # testing...
     config = {"host": "localhost", "port": 27017, "user": "", "password": "",
               "database": "metricdb", "md_collection": "metric_md"}
