@@ -159,7 +159,9 @@ def do_aggregate(jobid, zmq_context, **cfg):
         return None
     result = send_rpc(zmq_context, jagg_port, "agg", **cfg)
 
-
+#
+# TODO: delete!
+#
 def make_timers(jobid):
     """
     Create one timer for each aggregator config. An aggregator config can

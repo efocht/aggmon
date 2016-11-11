@@ -15,6 +15,9 @@ class RepeatEvent(object):
         self.is_running = False
         self.start()
 
+    def __repr__(self):
+        return "RepeatEvent(interval=%r, %s, args=%r, kwargs=%r)" % (self.interval, self.function.__name__, self.args, self.kwargs)
+
     def _run(self):
         self.is_running = False
         log.debug("_run %r(%r, %r)" % (self.function, self.args, self.kwargs))

@@ -6,6 +6,7 @@ import sys
 import re
 import pdb
 #from pymongo import MongoClient, ASCENDING
+import signal
 import threading
 import time
 try:
@@ -19,10 +20,13 @@ from agg_mcache import MCache
 from agg_rpc import *
 import basic_aggregators as aggs
 from config import Config, DEFAULT_CONFIG_DIR
+from repeat_event import RepeatEvent
+from scheduler import Scheduler
 
 
 log = logging.getLogger( __name__ )
 component = None
+main_stopping = False
 
 
 """
@@ -146,7 +150,7 @@ class JobAggregator(threading.Thread):
         """
         while not self.stopping:
             try:
-                msg = self.queue.get()
+                msg = self.queue.get(timeout=1)
             except (KeyboardInterrupt, SystemExit) as e:
                 log.warning("Interrupt in thread? %r" % e)
                 continue
@@ -158,15 +162,7 @@ class JobAggregator(threading.Thread):
                 #
                 # do the work
                 #
-                if "_COMMAND_" in msg:
-                    log.debug("job_agg: msg = %r" % msg)
-                    # this must be a command record
-                    cmdlist = msg["_COMMAND_"]
-                    # execute it, means: do some aggregation
-                    if cmdlist["cmd"] == "agg":
-                        self.do_aggregate_and_send(cmdlist)
-
-                elif "V" in msg:
+                if "V" in msg:
                     #log.debug("value message: %r" % msg)
                     # this is a value message
                     metric = msg["N"]
@@ -185,8 +181,16 @@ class JobAggregator(threading.Thread):
 
             self.queue.task_done()
 
+
+def sig_handler(signum, stack):
+    global main_stopping
+    log.info("Received signal %d" % signum)
+    if signum in (signal.SIGINT, signal.SIGQUIT, signal.SIGHUP, signal.SIGTERM):
+        main_stopping = True
+
+            
 def aggmon_jobagg(argv):
-    global component
+    global component, main_stopping
 
     ap = argparse.ArgumentParser()
     ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR, action="store", help="configuration directory")
@@ -212,27 +216,52 @@ def aggmon_jobagg(argv):
         log.error("jobid argument can not be empty!")
         sys.exit(1)
 
-    context = zmq.Context()
+    scheduler = Scheduler()
+    scheduler.start()
+
+    for signum in (signal.SIGINT, signal.SIGQUIT, signal.SIGHUP, signal.SIGTERM):
+        signal.signal(signum, sig_handler)
+
+    zmq_context = zmq.Context()
     try:
-        jagg = JobAggregator(pargs.jobid, context)
+        jagg = JobAggregator(pargs.jobid, zmq_context)
     except Exception as e:
         log.error("Failed to create JobAggregator: %r" % e)
         sys.exit(1)
     jagg.start()
 
     # Socket to receive messages on
-    receiver = context.socket(zmq.PULL)
+    receiver = zmq_context.socket(zmq.PULL)
     receiver.setsockopt(zmq.RCVHWM, 40000)
+    receiver.setsockopt(zmq.RCVTIMEO, 1000)
+    receiver.setsockopt(zmq.LINGER, 0)
     recv_port = zmq_socket_bind_range(receiver, pargs.listen)
     assert(recv_port is not None)
 
-
     def aggregate_rpc(msg):
+        _aggregate_rpc(**msg)
+
+    def _aggregate_rpc(**msg):
         agg_rpcs = component.state.get("stats.agg_rpcs", 0)
         agg_rpcs += 1
         num_sent = jagg.do_aggregate_and_send(msg)
         aggs_sent = component.state.get("stats.aggs_sent", 0) + num_sent
         component.update({"stats.agg_rpcs": agg_rpcs, "stats.aggs_sent": aggs_sent})
+
+    def make_timers():
+        """
+        Create one timer for each aggregator config. An aggregator config can
+        trigger the aggregation of multiple metrics.
+        """
+    
+        timers = []
+        for cfg in config.get("/aggregate"):
+            if cfg["agg_class"] == "job":
+                interval = cfg["interval"]
+                t = RepeatEvent(scheduler, interval, _aggregate_rpc, **cfg)
+                timers.append(t)
+        log.info("made timers for jobid '%s': %r" % (pargs.jobid, timers))
+        return timers
 
     def show_mcache(msg):
         return jagg.metric_caches
@@ -241,7 +270,7 @@ def aggmon_jobagg(argv):
         for msgb in pargs.msgbus:
             log.info( "subscribing to msgs of job %s at %s" % (pargs.jobid, msgb) )
             me_addr = zmq_own_addr_for_uri(msgb)
-            send_rpc(context, msgb, "subscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port),
+            send_rpc(zmq_context, msgb, "subscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port),
                      J=pargs.jobid)
 
     def unsubscribe_and_quit(__msg):
@@ -249,10 +278,10 @@ def aggmon_jobagg(argv):
         for msgb in pargs.msgbus:
             log.info( "unsubscribing jobid %s from %s" % (pargs.jobid, msgb) )
             me_addr = zmq_own_addr_for_uri(msgb)
-            send_rpc(context, msgb, "unsubscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port))
+            send_rpc(zmq_context, msgb, "unsubscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port))
         os._exit(0)
 
-    rpc = RPCThread(context, listen=pargs.cmd_port)
+    rpc = RPCThread(zmq_context, listen=pargs.cmd_port)
     rpc.start()
     rpc.register_rpc("agg", aggregate_rpc)
     rpc.register_rpc("quit", unsubscribe_and_quit, early_reply=True)
@@ -267,44 +296,33 @@ def aggmon_jobagg(argv):
         me_listen = "tcp://%s:%d" % (me_addr, recv_port)
         me_rpc = "tcp://%s:%d" % (me_addr, rpc.port)
         state = get_kwds(component="job_agg", cmd_port=me_rpc, listen=me_listen, jobid=pargs.jobid)
-        component = ComponentState(context, pargs.dispatcher, state=state)
+        component = ComponentState(zmq_context, pargs.dispatcher, state=state)
         rpc.register_rpc("resend_state", component.reset_timer)
+
+    make_timers()
 
     tstart = None
     log.info( "Started msg receiver on %s" % pargs.listen )
     count = 0
-    while True:
+    while not main_stopping:
         try:
             s = receiver.recv()
             #log.debug("received msg on PULL port: %r" % s)
             msg = json.loads(s)
 
-            cmd = None
-            if "_COMMAND_" in msg:
-                cmd = msg["_COMMAND_"]
-
-            if cmd is not None:
-                if cmd["cmd"] == "quit":
-                    log.info( "Stopping job aggregator for jobid %s on 'quit' command." % pargs.jobid )
-                    break
-                elif cmd["cmd"] == "resend_state":
-                    log.info( "State resend requested." )
-                    if component is not None:
-                        component.reset_timer()
-                    continue
-
             jagg.queue.put(msg)
-            if count == 0 or (cmd is not None and cmd["cmd"] == "reset-stats"):
+            if count == 0:
                 tstart = time.time()
                 count = 0
             count += 1
             component.update({"stats.val_msgs_recvd": count})
-            if (pargs.stats and count % 10000 == 0) or \
-               (cmd is not None and cmd["cmd"] == "show-stats"):
+            if (pargs.stats and count % 10000 == 0):
                 tend = time.time()
                 sys.stderr.write("%d msgs in %f seconds, %f msg/s\n" %
                                  (count, tend - tstart, float(count)/(tend - tstart)))
                 sys.stderr.flush()
+        except zmq.error.Again as e:
+            continue
         except Exception as e:
             print "Exception in msg receiver: %r" % e
             jagg.stopping = True
@@ -312,7 +330,14 @@ def aggmon_jobagg(argv):
 
     time.sleep(0.1)
     print "%d messages received" % count
-    
+    pdb.set_trace()
+    rpc.stop()
+    rpc.join()
+    jagg.stopping = True
+    scheduler.stop()
+    scheduler.join()
+    os._exit(0)
+
 
 if __name__ == "__main__":
     aggmon_jobagg(sys.argv)
