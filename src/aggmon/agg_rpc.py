@@ -151,7 +151,7 @@ class RPCThread(threading.Thread):
                     if cmd in self.rpcs:
                         func, args, kwargs, post, post_args, early_reply = self.rpcs[cmd]
                         if early_reply is not None:
-                            rep_msg = json.dumps({"RESULT": early_reply})
+                            rep_msg = json.dumps({"RESULT": early_reply}, default=repr)
                             log.debug( "sending RPC reply msg: %r" % rep_msg )
                             self.responder.send(rep_msg)
                             
