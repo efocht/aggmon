@@ -7,3 +7,7 @@ agg-templates:
 
      long-interval:
          interval:        300
+
+     short-interval:
+         interval:        30
+         ttl:             50
