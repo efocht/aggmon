@@ -23,6 +23,7 @@ from hierarchy_adapter import HierarchyAdapter
 from metric_store.mongodb_store import MongoDBMetricStore
 import pdb
 from StringIO import StringIO
+from threading import Lock
 import sys
 
 
@@ -148,6 +149,7 @@ class MMetric(ContainerObject):
 class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
 
     def __init__( self, config ):
+        self._parser_lock = Lock()
         self.qp = parsing.Lr( query_parser.spec )
         self.sp = parsing.Lr( selector_parser.spec )
         host = config["host"]
@@ -179,18 +181,21 @@ class HierarchyAdapterMonitorMongoDB( HierarchyAdapter ):
         clean_content["_id"] = self.rid_to_oid( content["_id"] )
         return clean_content
 
+
     def _parse_query( self, arg ):
-        self.qp.reset()
-        stream = StringIO( arg )
-        lexer = QueryLexer( self.qp, stream )
-        return lexer.parse().value
+        with self._parser_lock:
+            self.qp.reset()
+            stream = StringIO( arg )
+            lexer = QueryLexer( self.qp, stream )
+            return lexer.parse().value
 
 
     def _parse_selector( self, arg ):
-        self.sp.reset()
-        stream = StringIO( arg )
-        lexer = QueryLexer( self.sp, stream )
-        return lexer.parse().value
+        with self._parser_lock:
+            self.sp.reset()
+            stream = StringIO( arg )
+            lexer = QueryLexer( self.sp, stream )
+            return lexer.parse().value
 
 
     def client( self, op, *args ):
