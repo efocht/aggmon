@@ -33,13 +33,13 @@ for P in bin/*; do
 done
 
 install -m 755 -d %{buildroot}/%{python_sitelib}
-for D in aggmon res_mngr metric_store; do
+for D in %{name} res_mngr metric_store; do
     install -m 755 -d %{buildroot}/%{python_sitelib}/"$D"
     for P in src/"$D"/*.py*; do
         install -m 644 "$P" %{buildroot}/%{python_sitelib}/"$D"/
     done
 done
-install -m 644 src/aggmon/module-quantiles/quantiles.so %{buildroot}/%{python_sitelib}/aggmon/
+install -m 644 src/%{name}/module-quantiles/quantiles.so %{buildroot}/%{python_sitelib}/%{name}/
 
 install -m 755 -d %{buildroot}/%{_sysconfdir}/%{name}
 for P in config.d/*; do
@@ -51,11 +51,11 @@ rm -rf %{buildroot}
 
 %files
 %defattr(-, root, root)
-%{python_sitelib}/aggmon/*
+%{python_sitelib}/%{name}/*
 %{python_sitelib}/res_mngr/*
 %{_bindir}/*
 %{_unitdir}/*
-%{_sysconfdir}/*
+%config(noreplace) %{_sysconfdir}/%{name}/*
 
 %package -n metric-store
 Summary: MetricStore abstraction layer
