@@ -26,14 +26,18 @@ class EtcdClient(Client):
         Put val into a queue using a sequential key.
         qkey specifies the key for the directory containing the queue.
         """
+        val = json.dumps(val)
         return self.write(qkey, val, append=True)
 
     def qget(self, qkey, timeout=None, wait=False):
         """
         Pop and return an entry from queue in sequential order.
+
+        A tuple of key and json deserialized value is returned, such that
+        the consumer can use the key for posting a result into a completion queue.
         """
         try:
             res = self.pop(self.read(qkey, sorted=True).children.next().key)
         except EtcdNotFile:
             raise EtcdQueueEmpty
-        return json.loads(res.value)
+        return res.key, json.loads(res.value)

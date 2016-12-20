@@ -184,15 +184,6 @@ class Config(object):
     
         self._config["aggregate"] = aggregate
 
-    def geta(self, *path):
-        d = self._config
-        for k in path:
-            if k in d:
-                d = d[k]
-                if d is None:
-                    break
-        return d
-
     def get(self, path):
         """Get value in the config nested dicts, represent the "path" to the value
         like a file system path. Each element is a key.
