@@ -7,6 +7,7 @@ import time
 import traceback
 from agg_rpc import send_rpc, zmq_own_addr_for_tgt, RPCNoReplyError
 from agg_job_command import send_agg_command
+from etcd_client import *
 from repeat_timer import RepeatTimer
 
 
@@ -38,6 +39,29 @@ def component_key(keys, kwds):
     return ":".join(key)
 
 
+def hierarchy_from_url(url):
+    """
+    Decode hierarchy and hierarchy_key from a hierarchy URL.
+
+    The URL has the format:
+    <hierarchy_name>:<hierarchy_path>
+    for example:
+    monitor:/universe/rack2
+
+    This function returns a tuple made of the hierarchy name and a flattened "hierarchy_key",
+    for example: ("universe", "universe_rack2")
+    The hierarchy_key can be used as a shard key in the data stores.
+    """
+    hierarchy = None
+    key = None
+    path = None
+    if url.find(":") > 0:
+        hierarchy = url[: url.find(":")]
+        path = url[url.find(":") + 1 :]
+    key = "_".join(path.split("/")[1:])
+    return hierarchy, key, path
+
+
 def check_output(*popenargs, **kwargs):
     process = subprocess.Popen(stdout=subprocess.PIPE, *popenargs, **kwargs)
     output, unused_err = process.communicate()
@@ -65,18 +89,28 @@ def group_name(group):
 
 class ComponentState(object):
     """
-    Component side state. A timer is instantiated and sends component state information periodically.
+    Component side state.
+    A timer is instantiated and sends component state information periodically.
     The state itself is in the dict "state".
     """
     this = None
     
-    def __init__(self, etcd_client, component_type, component_id,
+    def __init__(self, etcd_client, component_type, hierarchy_url,
                  ping_interval=DEFAULT_PING_INTERVAL, state={}):
         global this_component
         self.etcd_client = etcd_client
         self.component_type = component_type
+        self.hierarchy_url = hierarchy_url
+        hierarchy, component_id, hierarchy_path = hierarchy_from_url(hierarchy_url)
+        self.hierarchy = hierarchy
         self.component_id = component_id
-        self.etcd_path = ETCD_COMPONENT_PATH + "/" + component_type + "/" + component_id
+        self.etcd_path = "/".join([ETCD_COMPONENT_PATH, component_type, hierarchy, component_id])
+        # create component state directory
+        try:
+            self.etcd_client.write(self.etcd_path + "/state", None, dir=True, prevExist=False)
+        except EtcdAlreadyExist:
+            log.warning("etcd directory path for %s %s exists. Reusing." % (component_type, component_id))
+
         self.ping_interval = ping_interval
         self.state = state
         assert isinstance(self.state, dict), "ComponentState: state must be a dict!"
@@ -101,7 +135,7 @@ class ComponentState(object):
     def send_state_update(self):
         try:
             # TODO: make sure the path exists. Could make sense to create paths in init().
-            self.etcd_client.put(self.etcd_path + "/state", self.state)
+            return self.etcd_client.put(self.etcd_path + "/state", self.state)
         except Exception as e:
             log.warning("Etcd error at state update: %r" % e)
 
@@ -125,78 +159,78 @@ class ComponentStatesRepo(object):
         self.component_kill_cb = {}
 
 
-    def start_component(self, service, group_path, __CALLBACK=None, __CALLBACK_ARGS=[], **kwds):
+    def start_component(self, component_type, hierarchy_url,
+                        __CALLBACK=None, __CALLBACK_ARGS=[], **kwds):
         """
         Starts a component. Called from control to start collectors, aggregators, data_stores.
+
+        'component_type' is one of collector, data_store, job_agg, group_agg (maybe we
+        join the aggregators). It could be renamed to 'service', to be consistent with
+        the config, or we could rename service to component_type in the config. (TODO!)
+
+        'hierarchy' is the hierarchy name this component is working on.
+
+        'hierarchy_key' is the shard key for the flattened hierarchy corresponding to the
+        place where the comnponent is positioned. For the monitoring hierarchy this is the
+        flattened group. For the job hierarchy it is the job ID. Further details on the hierarchy
+        are in the /config/hierarchy/<hierarchy_key> value.
+
         """
-        if group_path not in self.config.get("/groups"):
-            log.error("start_component: group '%s' not found in configuration!" % group_path)
+        hierarchy, hierarchy_key, hierarchy_path = hierarchy_from_url(hierarchy_url)
+        if hierarchy_key not in self.config.get("/hierarchy/%s" % hierarchy):
+            log.error("start_component: hierarchy_key '%s' not found in configuration!" % hierarchy_key)
             return False
-        if service not in self.config.get("/services"):
-            log.error("start_component: service '%s' not found in configuration!" % service)
+        if component_type not in self.config.get("/services"):
+            log.error("start_component: service '%s' not found in configuration!" % component_type)
             return False
-        group = group_name(group_path)
-        nodes_key = "%s_nodes" % service
-        if nodes_key not in self.config.get("/groups/%s" % group_path):
-            log.error("start_component: '%s' not found in configuration of group '%s'!" % (nodes_key, group_path))
-            return False
-        nodes = self.config.get("/groups/%s/%s" % (group_path, nodes_key))
-        assert(isinstance(nodes, list))
         locals().update(kwds)
-        if "database" in self.config.get("/"):
-            if isinstance(self.config.get("/database"), dict):
-                locals().update(self.config.get("/database"))
         svc_info = self.config.get("/services/%s" % service)
         cwd = svc_info["cwd"]
         cmd = svc_info["cmd"]
         cmd_opts = svc_info["cmd_opts"]
-        if "cmdport_range" in svc_info:
-            cmdport = "tcp://0.0.0.0:%s" % svc_info["cmdport_range"]
         if "listen_port_range" in svc_info:
             listen = "tcp://0.0.0.0:%s" % svc_info["listen_port_range"]
         if "logfile" in svc_info:
             logfile = svc_info["logfile"] % locals()
-        state_file = "/tmp/state_%(service)s_%(group)s" % locals()
+        state_file = "/tmp/state_%(service)s_%(hierarchy)s_%(hierarchy_key)s" % locals()
         # register callback
         if __CALLBACK is not None:
-            key = service + ":" + component_key(self.config.get("/services/%s/component_key" % service), kwds)
+            key = service + ":" + hierarchy_url
             self.component_start_cb[key] = {"cb": __CALLBACK, "args": __CALLBACK_ARGS}
-        for host in nodes:
-            try:
-                cmd = which(cmd)
-                cmd_opts = cmd_opts % locals()
-                cmd = cmd + " " + cmd_opts
-                exec_cmd = self.config.get("/global/remote_cmd") % locals()
-                log.info("starting subprocess: %s" % exec_cmd)
-                out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
-                log.info("output: %s" % out)
-                break
-            except Exception as e:
-                log.error(traceback.format_exc())
-                log.error("subprocess error '%r'" % e)
-                log.error("subprocess error when running '%s' : '%r'" % (exec_cmd, e))
-                # trying the next node, if any
-    
-    
-    def kill_component(self, service, group_path, __CALLBACK=None, __CALLBACK_ARGS=[], **kwds):
+        try:
+            cmd = which(cmd)
+            cmd_opts = cmd_opts % locals()
+            cmd = cmd + " " + cmd_opts
+            exec_cmd = self.config.get("/global/local_cmd") % locals()
+            log.info("starting subprocess: %s" % exec_cmd)
+            out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
+            log.info("output: %s" % out)
+            break
+        except Exception as e:
+            log.error(traceback.format_exc())
+            log.error("subprocess error '%r'" % e)
+            log.error("subprocess error when running '%s' : '%r'" % (exec_cmd, e))
+            # trying the next node, if any
+
+
+    def kill_component(self, service, hierarchy_url, __CALLBACK=None, __CALLBACK_ARGS=[], **kwds):
         """
         Kill a component. First attempt is by sending it a "quit" command.
         This sets the "soft-fill" flag in the component state. When this flag is found at
         a subsequent kill attempt, the kill will attempt to kill the process of the
         component (hard kill).
         """
-        msg = {"component": service, "group": group_path}
+        msg = {"component": service, "hierarchy_url": hierarchy_url}
         msg.update(kwds)
         res = False
 
-        group = group_name(group_path)
         state = self.get_state(msg)
         if state is None:
             log.warning("component '%s' state not found. Don't know how to kill it." % service)
             return False
         # register callback
         if __CALLBACK is not None:
-            key = service + ":" + component_key(self.config.get("/services/%s/component_key" % service), kwds)
+            key = service + ":" + hierarchy_url
             self.component_kill_cb[key] = {"cb": __CALLBACK, "args": __CALLBACK_ARGS}
         if "cmd_port" not in state:
             log.error("cmd_port not found in state: %r" % state)
@@ -254,19 +288,19 @@ class ComponentStatesRepo(object):
         return res
 
 
-    def kill_components(self, component_types):
-        for group_path in self.config.get("/groups").keys():
-            for comp_type in component_types:
-                c = self.get_state({"component": comp_type, "group": group_path})
-                if c is not None:
-                    if "component" in c:
-                        log.info("killing component %r" % c)
-                        self.kill_component(comp_type, group_path, METHOD="kill")
-                    else:
-                        log.debug("components: %r" % c)
-                        for jobid, jagg in c.items():
-                            log.info("killing job_agg component %s" % jobid)
-                            self.kill_component(comp_type, group_path, jobid=jobid, METHOD="kill")
+    #def kill_components(self, component_types):
+    #    for group_path in self.config.get("/groups").keys():
+    #        for comp_type in component_types:
+    #            c = self.get_state({"component": comp_type})
+    #            if c is not None:
+    #                if "component" in c:
+    #                    log.info("killing component %r" % c)
+    #                    self.kill_component(comp_type, group_path, METHOD="kill")
+    #                else:
+    #                    log.debug("components: %r" % c)
+    #                    for jobid, jagg in c.items():
+    #                        log.info("killing job_agg component %s" % jobid)
+    #                        self.kill_component(comp_type, group_path, jobid=jobid, METHOD="kill")
 
 
     def process_status(self, component_state):
@@ -281,7 +315,7 @@ class ComponentStatesRepo(object):
             pid = component_state["pid"]
             host = component_state["host"]
             service = component_state["component"].replace("_", "")
-            exec_cmd = self.config.get("/global/remote_status") % locals()
+            exec_cmd = self.config.get("/global/local_status") % locals()
             log.info("starting subprocess: %s" % exec_cmd)
             out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
             log.info("output: '%s'" % out)
@@ -296,35 +330,34 @@ class ComponentStatesRepo(object):
             # trying the next node, if any
         return status
 
-    def get_components(self, component_type=None):
-        """
-        List component types, if component_type is None.
-        List components of a certain type, otherwise.
-        """
-        pass
 
-    
     def get_state(self, msg):
         """
+        Get the state of a component or all components of the same type.
+
+        'msg' is a dict that must contain at least a "component" key. If it also contains a
+        "hierarchy_url" key, then a particular instance of a component is looked up. Otherwise
+        all instances of the given component type are returned.
         """
         log.debug("get_state: msg %r" % msg)
-        if "component" not in msg:
-            return self.repo
-        component = msg["component"]
-        if component not in self.repo:
-            return {}
-        key = component_key(self.config.get("/services/%s/component_key" % component), msg)
-        if len(key) > 0:
-            if key in self.repo[component]:
-                return self.repo[component][key]
-            else:
-                # try to match for it
-                for k in self.repo[component].keys():
-                    if k.startswith(key):
-                        return self.repo[component][k]
-        else:
-            # return all components of this type
-            return self.repo[component]
+        path = ETCD_COMPONENT_PATH
+        if "component" in msg:
+            component = msg["component"]
+            path += "/" + component
+            
+            if "hierarchy_url" in msg:
+                hierarchy_url = msg["hierarchy_url"]
+                hierarchy, hierarchy_key, hierarchy_path = hierarchy_from_url(hierarchy_url)
+                path += "/" + hierarchy + "/" + hierarchy_key
+                return self.etcd_client.get(path + "/state")
+            elif "hierarchy" in msg:
+                path += "/" + hierarchy
+
+        result = []
+        for c in self.etcd_client.read(path, recursive=True).children:
+            if not c.dir and c.key.endswith("/state"):
+                result.append(c.value)
+        return result
 
 
     def del_state(self, msg):
