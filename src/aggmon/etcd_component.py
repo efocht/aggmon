@@ -5,7 +5,7 @@ import pdb
 import subprocess
 import time
 import traceback
-from agg_rpc import send_rpc, zmq_own_addr_for_tgt, RPCNoReplyError
+from etcd_rpc import send_rpc, own_addr_for_tgt, RPCNoReplyError
 from agg_job_command import send_agg_command
 from etcd_client import *
 from repeat_timer import RepeatTimer
@@ -118,7 +118,7 @@ class ComponentState(object):
         self.state["id"] = component_id
         self.state["pid"] = os.getpid()
         self.state["started"] = time.time()
-        self.state["host"] = zmq_own_addr_for_tgt('8.8.8.8')
+        self.state["host"] = own_addr_for_tgt('8.8.8.8')
         self.state["ping_interval"] = self.ping_interval
         self.timer = None
         self.reset_timer()
