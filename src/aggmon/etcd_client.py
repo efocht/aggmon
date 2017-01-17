@@ -29,7 +29,7 @@ class EtcdClient(Client):
         val = json.dumps(val)
         return self.write(qkey, val, append=True)
 
-    def qget(self, qkey, timeout=None, wait=False):
+    def qget(self, qkey, index=None, timeout=None, wait=False):
         """
         Pop and return an entry from queue in sequential order.
 
@@ -37,7 +37,10 @@ class EtcdClient(Client):
         the consumer can use the key for posting a result into a completion queue.
         """
         try:
-            res = self.pop(self.read(qkey, sorted=True).children.next().key)
+            res = self.pop(self.read(qkey, sorted=True, wait=wait,
+                                     waitIndex=index, timeout=timeout).children.next().key)
         except EtcdNotFile:
             raise EtcdQueueEmpty
+        except Exception as e:
+            raise e
         return res.key, json.loads(res.value)
