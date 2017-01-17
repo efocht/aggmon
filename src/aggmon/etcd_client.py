@@ -1,10 +1,13 @@
 from etcd import *
+from urllib3.exceptions import TimeoutError
 import json
 
 
 class EtcdQueueEmpty(EtcdException):
     pass
 
+class EtcdTimeout(EtcdException):
+    pass
 
 class EtcdClient(Client):
     def __init__(self, **kwds):
@@ -19,7 +22,7 @@ class EtcdClient(Client):
 
     def set(self, key, val, ttl=None):
         json_val = json.dumps(val)
-        return super(EtcdClient, self).set(key. json_val, ttl=ttl)
+        return super(EtcdClient, self).set(key, json_val, ttl=ttl)
 
     def qput(self, qkey, val):
         """
@@ -37,10 +40,16 @@ class EtcdClient(Client):
         the consumer can use the key for posting a result into a completion queue.
         """
         try:
-            res = self.pop(self.read(qkey, sorted=True, wait=wait,
+            logger = logging.getLogger()
+            old_log_level = logger.getEffectiveLevel()
+            logger.setLevel(logging.CRITICAL)
+            res = self.pop(self.read(qkey, sorted=True, wait=wait, recursive=True, dir=False,
                                      waitIndex=index, timeout=timeout).children.next().key)
+            logger.setLevel(old_log_level)
         except EtcdNotFile:
             raise EtcdQueueEmpty
+        except TimeoutError:
+            raise EtcTimeout
         except Exception as e:
             raise e
         return res.key, json.loads(res.value)
