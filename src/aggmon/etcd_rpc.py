@@ -162,9 +162,20 @@ class RPCThread(threading.Thread):
 #
 if __name__ == "__main__":
     import sys
-    log_level = logging.ERROR
+    log_level = logging.DEBUG
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
+
+    #
+    # tune logging levels of some of the called components
+    #
+    log_levels = {
+        "etcd.client": logging.CRITICAL,
+        "urllib3.connectionpool": logging.WARNING,
+    }
+    for l_name, l_lev in log_levels.items():
+        l = logging.getLogger(l_name)
+        l.setLevel(l_lev)
 
     etcd_client = EtcdClient()
     etcd_client.delete("/RPCTEST", recursive=True)

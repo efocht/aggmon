@@ -3,6 +3,9 @@ from urllib3.exceptions import TimeoutError
 import json
 
 
+log = logging.getLogger( __name__ )
+
+
 class EtcdQueueEmpty(EtcdException):
     pass
 
@@ -40,12 +43,12 @@ class EtcdClient(Client):
         the consumer can use the key for posting a result into a completion queue.
         """
         try:
-            logger = logging.getLogger()
-            old_log_level = logger.getEffectiveLevel()
-            logger.setLevel(logging.CRITICAL)
+            #logger = logging.getLogger("etcd.client")
+            #old_log_level = logger.getEffectiveLevel()
+            #logger.setLevel(logging.CRITICAL)
             res = self.pop(self.read(qkey, sorted=True, wait=wait, recursive=True, dir=False,
                                      waitIndex=index, timeout=timeout).children.next().key)
-            logger.setLevel(old_log_level)
+            #logger.setLevel(old_log_level)
         except EtcdNotFile:
             raise EtcdQueueEmpty
         except TimeoutError:
