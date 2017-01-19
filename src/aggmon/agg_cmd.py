@@ -5,8 +5,9 @@ import re
 import sys
 import time
 import json
-import zmq
-from agg_rpc import send_rpc
+from etcd_client import EtcdClient
+from etcd_component import ETCD_COMPONENT_PATH, hierarchy_from_url
+from etcd_rpc import send_rpc
 
 
 log = logging.getLogger( __name__ )
@@ -24,32 +25,32 @@ def dict_from_args(*args):
     return res
 
 
-def subscribe(context, server, *args):
+def subscribe(etcd_client, rpc_path, *args):
     if len(args) < 1:
         return None
     target = args[0]
     rest = args[1:]
     msg = dict_from_args(*rest)
     msg["TARGET"] = target
-    result = send_rpc(context, server, "subscribe", **msg)
+    result = send_rpc(etcd_client, rpc_path, "subscribe", **msg)
     return result
 
 
-def unsubscribe(context, server, *args):
+def unsubscribe(etcd_client, rpc_path, *args):
     if len(args) < 1:
         return None
     target = args[0]
     msg = {"TARGET": target}
-    result = send_rpc(context, server, "unsubscribe", **msg)
+    result = send_rpc(etcd_client, rpc_path, "unsubscribe", **msg)
     return result
 
 
-def show_subscriptions(context, server):
-    result = send_rpc(context, server, "show_subs")
+def show_subscriptions(etcd_client, rpc_path):
+    result = send_rpc(etcd_client, rpc_path, "show_subs")
     return result
 
 
-def tag_add(context, server, *args):
+def tag_add(etcd_client, rpc_path, *args):
     if len(args) < 2:
         return None
     tag_name = args[0]
@@ -58,32 +59,33 @@ def tag_add(context, server, *args):
     msg = dict_from_args(*rest)
     msg["TAG_KEY"] = tag_name
     msg["TAG_VALUE"] = tag_value
-    result = send_rpc(context, server, "add_tag", **msg)
+    result = send_rpc(etcd_client, rpc_path, "add_tag", **msg)
     return result
 
 
-def tag_remove(context, server, *args):
+def tag_remove(etcd_client, rpc_path, *args):
     if len(args) < 2:
         return None
     tag_key = args[0]
     tag_val = args[1]
     msg = {"TAG_KEY": tag_key, "TAG_VALUE": tag_val}
-    result = send_rpc(context, server, "remove_tag", **msg)
+    result = send_rpc(etcd_client, rpc_path, "remove_tag", **msg)
     return result
 
 
-def tags_reset(context, server):
-    result = send_rpc(context, server, "reset_tags")
+def tags_reset(etcd_client, rpc_path):
+    result = send_rpc(etcd_client, rpc_path, "reset_tags")
     return result
 
-def tags_show(context, server):
-    result = send_rpc(context, server, "show_tags")
+def tags_show(etcd_client, rpc_path):
+    result = send_rpc(etcd_client, rpc_path, "show_tags")
     return result
 
 
 def aggmon_cmd(argv):
     ap = argparse.ArgumentParser()
-    ap.add_argument('-C', '--cmd-port', default="tcp://127.0.0.1:5558", action="store", help="RPC command port")
+    ap.add_argument('-C', '--component-type', default="", action="store", help="component type of the receiver")
+    ap.add_argument('-H', '--hierarchy-url', default="", action="store", help="hierarchy URL of the receiver")
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
     ap.add_argument('-v', '--verbose', default=False, action="store_true", help="verbosity")
 
@@ -104,7 +106,8 @@ def aggmon_cmd(argv):
     subp.add_argument('--show', default=False, action="store_true", help="show subscriptions")
 
     rawp = sp.add_parser('raw',  help="Raw commands")
-    rawp.add_argument('args', nargs='+', help="raw command and arguments, arguments coming as key value pairs. Example: test_rpc key1 val1 key2 val2")
+    rawp.add_argument('args', nargs='+', help="raw command and arguments, arguments coming as key value pairs. "
+                      + "Example: test_rpc key1 val1 key2 val2")
 
     pargs = ap.parse_args(argv)
 
@@ -112,34 +115,33 @@ def aggmon_cmd(argv):
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
 
-    context = zmq.Context()
-    server = pargs.cmd_port
+    etcd_client = EtcdClient()
+    hierarchy, key, path = hierarchy_from_url(pargs.hierarchy_url)
+    rpc_path = ETCD_COMPONENT_PATH + "/" + pargs.component_type + "/" + hierarchy + "/" + key + "/rpc"
 
     if pargs.cmd_group == "tag":
         if pargs.add is not None:
-            result = tag_add(context, server, *pargs.add)
+            result = tag_add(etcd_client, rpc_path, *pargs.add)
         elif pargs.remove is not None:
-            result = tag_remove(context, server, *pargs.remove)
+            result = tag_remove(etcd_client, rpc_path, *pargs.remove)
         elif pargs.show:
-            result = tags_show(context, server)
+            result = tags_show(etcd_client, rpc_path)
 
     elif pargs.cmd_group == "sub":
         if pargs.add is not None:
-            result = subscribe(context, server, *pargs.add)
+            result = subscribe(etcd_client, rpc_path, *pargs.add)
         elif pargs.remove is not None:
-            result = unsubscribe(context, server, *pargs.remove)
+            result = unsubscribe(etcd_client, rpc_path, *pargs.remove)
         elif pargs.show:
-            result = show_subscriptions(context, server)
+            result = show_subscriptions(etcd_client, rpc_path)
 
     elif pargs.cmd_group == "raw":
         if pargs.args is not None:
             rpc_cmd = pargs.args[0]
             rpc_args = dict_from_args(*pargs.args[1:])
-            result = send_rpc(context, server, rpc_cmd, **rpc_args)
+            result = send_rpc(etcd_client, rpc_path, rpc_cmd, **rpc_args)
 
     print json.dumps(result)
-
-    context.destroy()
 
 if __name__ == "__main__":
     aggmon_cmd(sys.argv)
