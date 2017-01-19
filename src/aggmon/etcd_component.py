@@ -5,7 +5,7 @@ import pdb
 import subprocess
 import time
 import traceback
-from etcd_rpc import send_rpc, own_addr_for_tgt, RPCNoReplyError
+from etcd_rpc import send_rpc, own_addr_for_tgt, RPCThread, RPCNoReplyError
 from agg_job_command import send_agg_command
 from etcd_client import *
 from repeat_timer import RepeatTimer
@@ -94,10 +94,9 @@ class ComponentState(object):
     The state itself is in the dict "state".
     """
     this = None
-    
+
     def __init__(self, etcd_client, component_type, hierarchy_url,
                  ping_interval=DEFAULT_PING_INTERVAL, state={}):
-        global this_component
         self.etcd_client = etcd_client
         self.component_type = component_type
         self.hierarchy_url = hierarchy_url
@@ -107,7 +106,7 @@ class ComponentState(object):
         self.etcd_path = "/".join([ETCD_COMPONENT_PATH, component_type, hierarchy, component_id])
         # create component state directory
         try:
-            self.etcd_client.write(self.etcd_path + "/state", None, dir=True, prevExist=False)
+            self.etcd_client.write(self.etcd_path, None, dir=True, prevExist=False)
         except EtcdAlreadyExist:
             log.warning("etcd directory path for %s %s exists. Reusing." % (component_type, component_id))
 
@@ -117,12 +116,16 @@ class ComponentState(object):
         self.state["component"] = component_type
         self.state["id"] = component_id
         self.state["pid"] = os.getpid()
+        self.state["hierarchy_url"] = hierarchy_url
         self.state["started"] = time.time()
         self.state["host"] = own_addr_for_tgt('8.8.8.8')
         self.state["ping_interval"] = self.ping_interval
+        self.state["rpc_path"] = self.etcd_path + "/rpc"
         self.timer = None
         self.reset_timer()
         ComponentState.this = self
+        self.rpc = RPCThread(etcd_client, self.etcd_path + "/rpc")
+        self.rpc.start()
 
     def reset_timer(self, *__args, **__kwds):
         if self.timer is not None:
@@ -135,7 +138,7 @@ class ComponentState(object):
     def send_state_update(self):
         try:
             # TODO: make sure the path exists. Could make sense to create paths in init().
-            return self.etcd_client.put(self.etcd_path + "/state", self.state)
+            return self.etcd_client.set(self.etcd_path + "/state", self.state)
         except Exception as e:
             log.warning("Etcd error at state update: %r" % e)
 
@@ -205,7 +208,6 @@ class ComponentStatesRepo(object):
             log.info("starting subprocess: %s" % exec_cmd)
             out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
             log.info("output: %s" % out)
-            break
         except Exception as e:
             log.error(traceback.format_exc())
             log.error("subprocess error '%r'" % e)
@@ -248,7 +250,7 @@ class ComponentStatesRepo(object):
         
         # send "quit" cmd over RPC
         try:
-            reply = send_rpc(self.zmq_context, state["cmd_port"], "quit")
+            reply = send_rpc(self.etcd_client, state["rpc_path"], "quit")
             res = True
         except RPCNoReplyError as e:
             log.warning("Component did not reply, maybe it is dead already? %r" % e)
@@ -417,16 +419,12 @@ class ComponentStatesRepo(object):
 
     def request_resend(self, state):
         res = False
-        if "cmd_port" in state:
+        if "rpc_path" in state:
             # send "quit" cmd over RPC
-            log.info("requesting resend_state from %s" % state["cmd_port"])
-            reply = send_rpc(self.zmq_context, state["cmd_port"], "resend_state")
+            log.info("requesting resend_state from %s" % state["rpc_path"])
+            reply = send_rpc(self.etcd_client, state["rpc_path"], "resend_state")
             if reply is not None:
                 res = True
-        elif "listen" in state:
-            # send "quit" cmd over PULL port
-            send_agg_command(self.zmq_context, state["listen"], "resend_state")
-            res = True
         return res
 
     def load_state(self, state_file):

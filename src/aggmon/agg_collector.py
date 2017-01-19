@@ -18,17 +18,18 @@ import sys
 import threading
 import time
 import traceback
+import zmq
 try:
     import ujson as json
 except ImportError:
     import json
 
-import zmq
 from Queue import Queue, Empty
-from agg_component import get_kwds, ComponentState
+from agg_helpers import *
+from etcd_component import get_kwds, ComponentState
+from etcd_config import Config, DEFAULT_CONFIG_DIR
+from etcd_rpc import *
 from msg_tagger import MsgTagger
-from agg_rpc import *
-from config import Config, DEFAULT_CONFIG_DIR
 
 
 log = logging.getLogger( __name__ )
@@ -313,25 +314,33 @@ def test_pub():
 
 
 def aggmon_collector(argv):
-    global component
+    global comp
 
     ap = argparse.ArgumentParser()
-    ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR, action="store", help="configuration directory")
-    ap.add_argument('-C', '--cmd-port', default="tcp://127.0.0.1:5556", action="store", help="RPC command port")
-    ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
-    ap.add_argument('-g', '--group', default="universe", action="store", help="group for this message bus. Default: /universe")
-    ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
-    ap.add_argument('-L', '--listen', default="tcp://127.0.0.1:5555", action="store", help="zmq pull port to listen on")
-    ap.add_argument('-M', '--msgbus', default="", action="store", help="subscription port for other message bus")
-    ap.add_argument('-s', '--stats', default=False, action="store_true", help="print statistics info")
-    ap.add_argument('-S', '--state-file', default="agg_collector.state", action="store", help="file to store tagger rules and subscriptions")
-    ap.add_argument('-v', '--verbose', type=int, default=0, action="store", help="verbosity")
+    ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR,
+                    action="store", help="configuration directory")
+    ap.add_argument('-H', '--hierarchy-url', default="", action="store",
+                    help="position in hierarchy for this component, eg. group:/universe")
+    ap.add_argument('-l', '--log', default="info", action="store",
+                    help="logging: info, debug, ...")
+    ap.add_argument('-L', '--listen', default="tcp://127.0.0.1:5555",
+                    action="store", help="zmq pull port to listen on")
+    ap.add_argument('-M', '--msgbus', default="", action="store",
+                    help="subscription port for other message bus, eg. for testing")
+    ap.add_argument('-s', '--stats', default=False, action="store_true",
+                    help="print statistics info")
+    ap.add_argument('-v', '--verbose', type=int, default=0, action="store",
+                    help="verbosity")
     pargs = ap.parse_args(argv)
 
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
 
+    if len(pargs.hierarchy_url) == 0:
+        log.error("No hierarchy URL provided for this component. Use the -H option!")
+        sys.exit(1)
+    
     config = Config(config_dir=pargs.config)
 
     state = []
@@ -387,37 +396,32 @@ def aggmon_collector(argv):
     try:
         context = zmq.Context()
         subq = SubscriberQueue(context, pargs.listen, pre=[spoofed_host, convert_str_int_float])
-
         tagger = MsgTagger(tags=tags)
         pubsub = AggPubThread(context, subq.queue, subs=subs, tagger=tagger.do_tag)
-    
-        rpc = RPCThread(context, listen=pargs.cmd_port)
-        rpc.start()
     except Exception as e:
         log.error(traceback.format_exc())
         log.error("Failed to initialize something essential. Exiting.")
         os._exit(1)
 
-    rpc.register_rpc("subscribe", pubsub.subscribe, post=save_subs_tags)
-    rpc.register_rpc("unsubscribe", pubsub.unsubscribe, post=save_subs_tags)
-    rpc.register_rpc("show_subs", pubsub.show_subscriptions)
-    rpc.register_rpc("reset_subs", pubsub.reset_subscriptions, post=save_subs_tags)
-    rpc.register_rpc("add_tag", tagger.add_tag, post=save_subs_tags)
-    rpc.register_rpc("remove_tag", tagger.remove_tag, post=save_subs_tags)
-    rpc.register_rpc("reset_tags", tagger.reset_tags, post=save_subs_tags)
-    rpc.register_rpc("show_tags", tagger.show_tags)
-    rpc.register_rpc("quit", quit, early_reply=True)
-
     pubsub.start()
     subq.start()
 
-    if len(pargs.dispatcher) > 0:
-        me_addr = zmq_own_addr_for_uri(pargs.dispatcher)
-        me_listen = "tcp://%s:%d" % (me_addr, subq.port)
-        me_rpc = "tcp://%s:%d" % (me_addr, rpc.port)
-        state = get_kwds(component="collector", cmd_port=me_rpc, listen=me_listen, group=pargs.group)
-        component = ComponentState(context, pargs.dispatcher, state=state)
-        rpc.register_rpc("resend_state", component.reset_timer)
+    etcd_client = EtcdClient()
+    me_addr = own_addr_for_tgt("8.8.8.8")
+    me_listen = "tcp://%s:%d" % (me_addr, subq.port)
+    state = get_kwds(listen=me_listen)
+
+    comp = ComponentState(etcd_client, "collector", pargs.hierarchy_url, state=state)
+    comp.rpc.register_rpc("subscribe", pubsub.subscribe, post=save_subs_tags)
+    comp.rpc.register_rpc("unsubscribe", pubsub.unsubscribe, post=save_subs_tags)
+    comp.rpc.register_rpc("show_subs", pubsub.show_subscriptions)
+    comp.rpc.register_rpc("reset_subs", pubsub.reset_subscriptions, post=save_subs_tags)
+    comp.rpc.register_rpc("add_tag", tagger.add_tag, post=save_subs_tags)
+    comp.rpc.register_rpc("remove_tag", tagger.remove_tag, post=save_subs_tags)
+    comp.rpc.register_rpc("reset_tags", tagger.reset_tags, post=save_subs_tags)
+    comp.rpc.register_rpc("show_tags", tagger.show_tags)
+    comp.rpc.register_rpc("quit", quit, early_reply=True)
+    comp.rpc.register_rpc("resend_state", comp.reset_timer)
 
     if len(pargs.msgbus) > 0:
         print "subscribing to all msgs from %s" % pargs.msgbus

@@ -87,17 +87,40 @@ class RPCThread(threading.Thread):
         self.etcd_client = etcd_client
         self.rpc_cmd_path = rpc_cmd_path
         self.rpc_res_path = _rpc_res_path(rpc_cmd_path)
+        #
+        # tune logging levels of some of the called components
+        #
+        log_levels = {
+            "etcd.client": logging.CRITICAL,
+            "urllib3.connectionpool": logging.WARNING,
+        }
+        for l_name, l_lev in log_levels.items():
+            l = logging.getLogger(l_name)
+            l.setLevel(l_lev)
+        #
+        # create paths if not existing
+        #
+        try:
+            self.etcd_client.write(self.rpc_cmd_path, None, dir=True, prevExist=False)
+        except EtcdAlreadyExist:
+            log.warning("etcd directory path %s exists. Reusing it." % self.rpc_cmd_path)
+        try:
+            self.etcd_client.write(self.rpc_res_path, None, dir=True, prevExist=False)
+        except EtcdAlreadyExist:
+            log.warning("etcd directory path %s exists. Reusing it." % self.rpc_res_path)
+        #
         self.stopping = False
         threading.Thread.__init__(self)
         self.daemon = True
-        self.rpcs = {}
+        self._rpcs = {}
+
 
     # TODO: integrate rpcs
     def register_rpc(self, cmd, function, args=[], kwargs={}, post=None, post_args=[], early_reply=None):
         """
         A rpc function will be called with the arguments: cmd, msg, *args, **kwargs
         """
-        self.rpcs[cmd] = (function, args, kwargs, post, post_args, early_reply)
+        self._rpcs[cmd] = (function, args, kwargs, post, post_args, early_reply)
 
     def run(self):
         log.info( "[Started RPCThread at %s]" % self.rpc_cmd_path )
@@ -113,8 +136,8 @@ class RPCThread(threading.Thread):
                     res = "UNKNOWN"
                     cmd = msg["CMD"]
                     del msg["CMD"]
-                    if cmd in self.rpcs:
-                        func, args, kwargs, post, post_args, early_reply = self.rpcs[cmd]
+                    if cmd in self._rpcs:
+                        func, args, kwargs, post, post_args, early_reply = self._rpcs[cmd]
                         if early_reply is not None:
                             rep_msg = {"RESULT": early_reply}
                             log.debug( "sending RPC reply msg: %r" % rep_msg )
@@ -165,17 +188,6 @@ if __name__ == "__main__":
     log_level = logging.DEBUG
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
-
-    #
-    # tune logging levels of some of the called components
-    #
-    log_levels = {
-        "etcd.client": logging.CRITICAL,
-        "urllib3.connectionpool": logging.WARNING,
-    }
-    for l_name, l_lev in log_levels.items():
-        l = logging.getLogger(l_name)
-        l.setLevel(l_lev)
 
     etcd_client = EtcdClient()
     etcd_client.delete("/RPCTEST", recursive=True)
