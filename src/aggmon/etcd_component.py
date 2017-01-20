@@ -127,6 +127,14 @@ class ComponentState(object):
         self.rpc = RPCThread(etcd_client, self.etcd_path + "/rpc")
         self.rpc.start()
 
+    def iter_components_state(self, component_type=None):
+        path = ETCD_COMPONENT_PATH
+        if component_type is not None:
+            path += "/" + component_type
+        for r in self.etcd_client.read(path, recursive=True).children:
+            if r.key.endswith("/state"):
+                yield r
+
     def reset_timer(self, *__args, **__kwds):
         if self.timer is not None:
             self.timer.stop()

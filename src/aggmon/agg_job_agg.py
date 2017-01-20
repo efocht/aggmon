@@ -15,9 +15,10 @@ except:
     import json
 import zmq
 from Queue import Queue, Empty
-from agg_component import get_kwds, ComponentState
+from agg_helpers import *
 from agg_mcache import MCache
-from agg_rpc import *
+from etcd_component import get_kwds, ComponentState
+from etcd_rpc import *
 import basic_aggregators as aggs
 from config import Config, DEFAULT_CONFIG_DIR
 from repeat_event import RepeatEvent
@@ -193,21 +194,30 @@ def aggmon_jobagg(argv):
     global component, main_stopping
 
     ap = argparse.ArgumentParser()
-    ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR, action="store", help="configuration directory")
-    ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5501", action="store", help="RPC command port")
-    ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
-    ap.add_argument('-j', '--jobid', default="", action="store", help="jobid for which this instance does aggregation")
-    ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
-    ap.add_argument('-L', '--listen', default="tcp://127.0.0.1:5560", action="store", help="zmq pull port to listen on")
+    ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR,
+                    action="store", help="configuration directory")
+    ap.add_argument('-H', '--hierarchy-url', default="", action="store",
+                    help="position in hierarchy for this component, eg. group:/universe")
+    ap.add_argument('-l', '--log', default="info", action="store",
+                    help="logging: info, debug, ...")
+    ap.add_argument('-L', '--listen', default="tcp://127.0.0.1:5560",
+                    action="store", help="zmq pull port to listen on")
     ap.add_argument('-M', '--msgbus', default=[], action="append",
                     help="subscription port(s) for message bus. can be used multiple times.")
-    ap.add_argument('-s', '--stats', default=False, action="store_true", help="print statistics info")
-    ap.add_argument('-v', '--verbose', type=int, default=0, action="store", help="verbosity")
+    ap.add_argument('-s', '--stats', default=False, action="store_true",
+                    help="print statistics info")
+    ap.add_argument('-v', '--verbose', type=int, default=0, action="store",
+                    help="verbosity")
     pargs = ap.parse_args(argv)
 
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
     logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
+
+    if len(pargs.hierarchy_url) == 0:
+        log.error("No hierarchy URL provided for this component. Use the -H option!")
+        sys.exit(1)
+
     component = None
 
     config = Config(config_dir=pargs.config)
@@ -235,8 +245,18 @@ def aggmon_jobagg(argv):
     receiver.setsockopt(zmq.RCVHWM, 40000)
     receiver.setsockopt(zmq.RCVTIMEO, 1000)
     receiver.setsockopt(zmq.LINGER, 0)
-    recv_port = zmq_socket_bind_range(receiver, pargs.listen)
+    recv_port = socket_bind_range(receiver, pargs.listen)
     assert(recv_port is not None)
+
+    etcd_client = EtcdClient()
+    me_addr = own_addr_for_tgt("8.8.8.8")
+    me_listen = "tcp://%s:%d" % (me_addr, recv_port)
+    state = get_kwds(listen=me_listen, jobid=pargs.jobid)
+    component = ComponentState(etcd_client, "job_agg", pargs.hierarchy_url, state=state)
+
+    collectors_rpc_paths = []
+    for cstate in component.iter_components_state(component_type="collector"):
+        collectors_rpc_paths.append(cstate.value["rpc_path"])
 
     def aggregate_rpc(msg):
         _aggregate_rpc(**msg)
@@ -267,37 +287,27 @@ def aggmon_jobagg(argv):
         return jagg.metric_caches
 
     def subscribe_collectors(__msg):
-        for msgb in pargs.msgbus:
-            log.info( "subscribing to msgs of job %s at %s" % (pargs.jobid, msgb) )
-            me_addr = zmq_own_addr_for_uri(msgb)
-            send_rpc(zmq_context, msgb, "subscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port),
+        # subscribe to collectors
+        for rpc_path in collectors_rpc_paths:
+            log.info( "subscribing to msgs of job %s at %s" % (pargs.jobid, rpc_path) )
+            send_rpc(etcd_client, rpc_path, "subscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port),
                      J=pargs.jobid)
 
     def unsubscribe_and_quit(__msg):
-        # subscribe to message bus
-        for msgb in pargs.msgbus:
-            log.info( "unsubscribing jobid %s from %s" % (pargs.jobid, msgb) )
-            me_addr = zmq_own_addr_for_uri(msgb)
-            send_rpc(zmq_context, msgb, "unsubscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port))
+        for rpc_path in collectors_rpc_paths:
+            log.info( "unsubscribing jobid %s from %s" % (pargs.jobid, rpc_path) )
+            send_rpc(etcd_client, rpc_path, "unsubscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port))
         os._exit(0)
 
-    rpc = RPCThread(zmq_context, listen=pargs.cmd_port)
-    rpc.start()
-    rpc.register_rpc("agg", aggregate_rpc)
-    rpc.register_rpc("quit", unsubscribe_and_quit, early_reply=True)
-    rpc.register_rpc("resubscribe", subscribe_collectors)
-    rpc.register_rpc("show_mcache", show_mcache)
 
-    # subscribe to message bus
+    # subscribe to collectors
     subscribe_collectors(None)
 
-    if len(pargs.dispatcher) > 0:
-        me_addr = zmq_own_addr_for_uri(pargs.dispatcher)
-        me_listen = "tcp://%s:%d" % (me_addr, recv_port)
-        me_rpc = "tcp://%s:%d" % (me_addr, rpc.port)
-        state = get_kwds(component="job_agg", cmd_port=me_rpc, listen=me_listen, jobid=pargs.jobid)
-        component = ComponentState(zmq_context, pargs.dispatcher, state=state)
-        rpc.register_rpc("resend_state", component.reset_timer)
+    component.rpc.register_rpc("agg", aggregate_rpc)
+    component.rpc.register_rpc("quit", unsubscribe_and_quit, early_reply=True)
+    component.rpc.register_rpc("resubscribe", subscribe_collectors)
+    component.rpc.register_rpc("show_mcache", show_mcache)
+    component.rpc.register_rpc("resend_state", component.reset_timer)
 
     make_timers()
 
@@ -330,9 +340,9 @@ def aggmon_jobagg(argv):
 
     time.sleep(0.1)
     print "%d messages received" % count
-    pdb.set_trace()
-    rpc.stop()
-    rpc.join()
+    #pdb.set_trace()
+    component.rpc.stop()
+    component.rpc.join()
     jagg.stopping = True
     scheduler.stop()
     scheduler.join()
