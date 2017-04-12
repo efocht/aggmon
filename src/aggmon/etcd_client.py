@@ -1,6 +1,7 @@
 from etcd import *
 from urllib3.exceptions import TimeoutError
 import json
+import os
 
 
 log = logging.getLogger( __name__ )
@@ -14,6 +15,12 @@ class EtcdTimeout(EtcdException):
 
 class EtcdClient(Client):
     def __init__(self, **kwds):
+        # for test purposes: set host and port
+        try:
+            kwds["host"] = os.environ["ETCDHOST"]
+            kwds["port"] = int(os.environ["ETCDPORT"])
+        except:
+            pass
         super(EtcdClient, self).__init__(**kwds)
 
     def deserialize(self, path):
@@ -30,8 +37,22 @@ class EtcdClient(Client):
                 child_key = child.key.split("/")[-1]
                 result[child_key] = self.deserialize(child.key)
         else:
-            result = json.loads(reply.value)
+            result = json.loads(str(reply.value))
         return result
+
+    def serialize(self, obj=None, base_path=""):
+        """
+        Serialize a nested structure of dicts into an etcd directory tree.
+        Objects of type dict within the config will be serialized as directories.
+        All values are JSON encoded.
+        """
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                path = base_path + "/" + key
+                self.serialize(value, path)
+        else:
+            etcd_file = json.dumps(obj)
+            super(EtcdClient, self).write(base_path, etcd_file)
 
     def get(self, key):
         res = super(EtcdClient, self).get(key)
@@ -73,3 +94,15 @@ class EtcdClient(Client):
         except Exception as e:
             raise e
         return res.key, json.loads(res.value)
+
+
+if __name__ == "__main__":
+    import pprint
+    from config import DEFAULT_CONFIG
+    pp = pprint.PrettyPrinter(indent=4)
+    pp.pprint(DEFAULT_CONFIG)
+    client.serialize(DEFAULT_CONFIG, "/config")
+    config = client.deserialize("/config")
+    pp.pprint(config)
+    print cmp(DEFAULT_CONFIG, config)
+
