@@ -16,6 +16,20 @@ class EtcdClient(Client):
     def __init__(self, **kwds):
         super(EtcdClient, self).__init__(**kwds)
 
+    def deserialize(self, path):
+        result = None
+        reply = super(EtcdClient, self).read(path)
+        if reply.dir:
+            result = dict()
+            for child in reply.leaves:
+                if child.key == path:
+                    continue
+                child_key = child.key.split("/")[-1]
+                result[child_key] = self.deserialize(child.key)
+        else:
+            result = json.loads(reply.value)
+        return result
+
     def get(self, key):
         res = super(EtcdClient, self).get(key)
         val = None
