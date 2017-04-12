@@ -99,6 +99,7 @@ class EtcdClient(Client):
 if __name__ == "__main__":
     import pprint
     from config import DEFAULT_CONFIG
+    client = EtcdClient()
     pp = pprint.PrettyPrinter(indent=4)
     pp.pprint(DEFAULT_CONFIG)
     client.serialize(DEFAULT_CONFIG, "/config")
