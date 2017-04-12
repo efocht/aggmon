@@ -17,6 +17,9 @@ class EtcdClient(Client):
         super(EtcdClient, self).__init__(**kwds)
 
     def deserialize(self, path):
+        """
+        Return directory/key-value hierarchy as a hierarchy of dicts.
+        """
         result = None
         reply = super(EtcdClient, self).read(path)
         if reply.dir:
