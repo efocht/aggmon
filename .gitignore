@@ -55,6 +55,20 @@ docs/_build/
 # PyBuilder
 target/
 
+# virtualenv
+bin/activate*
+bin/easy_install*
+bin/get_env_details
+bin/postactivate
+bin/postdeactivate
+bin/preactivate
+bin/predeactivate
+bin/python*
+bin/pip*
+lib64
+include
+.project
+
 # aggmon state files
 *.state
 
