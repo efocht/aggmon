@@ -25,7 +25,7 @@ class EtcdClient(Client):
 
     def deserialize(self, path):
         """
-        Return directory/key-value hierarchy as a hierarchy of dicts.
+        Return directory/key-value hierarchy as a hierarchy of nested dicts.
         """
         result = None
         reply = super(EtcdClient, self).read(path)
@@ -40,7 +40,7 @@ class EtcdClient(Client):
             result = json.loads(str(reply.value))
         return result
 
-    def serialize(self, obj=None, base_path=""):
+    def serialize(self, base_path="", obj=None):
         """
         Serialize a nested structure of dicts into an etcd directory tree.
         Objects of type dict within the config will be serialized as directories.
@@ -49,10 +49,41 @@ class EtcdClient(Client):
         if isinstance(obj, dict):
             for key, value in obj.items():
                 path = base_path + "/" + key
-                self.serialize(value, path)
+                self.serialize(path, value)
         else:
             etcd_file = json.dumps(obj)
             super(EtcdClient, self).write(base_path, etcd_file)
+
+    def update(self, path, new):
+        """
+        Update the etcd directory/key-value hierarchy at _path_ according to the
+        object _new_ passed in as argument. Do this with minimal operations.
+        New keys will be added, missing keys will be deleted, therefore the API
+        is different from what a dict().update() does!
+        """
+        old = self.deserialize(path)
+
+        if not isinstance(new, dict):
+            if isinstance(old, dict):
+                super(EtcdClient, self).delete(path, recursive=True, dir=True)
+            if old != new:
+                # new is not a dict: simply serialize it
+                value = json.dumps(new)
+                super(EtcdClient, self).write(path, value)
+        else:
+            if not isinstance(old, dict):
+                super(EtcdClient, self).delete(path, recursive=True, dir=True)
+            else:
+                # - are any keys in old to be deleted?
+                for key in set(old.keys()) - set(new.keys()):
+                    super(EtcdClient, self).delete(path + "/" + key, recursive=True, dir=True)
+                    del old[key]
+                # - are there new keys?
+                for key in set(new.keys()) - set(old.keys()):
+                    self.serialize(path + "/" + key, new[key])
+                    del new[key]
+            for key, value in new.items():
+                self.update(path + "/" + key, value)
 
     def get(self, key):
         res = super(EtcdClient, self).get(key)
