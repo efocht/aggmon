@@ -25,12 +25,12 @@ DEFAULT_CONFIG = {
     },
     "hierarchy": {
         "monitor": {
-            "group": [
-                ]
+            "group0": {
+                }
             },
         "job": {
-            "jobid": [
-                ]
+            "jobid0": {
+                }
             }
     },
     "services": {
@@ -40,7 +40,7 @@ DEFAULT_CONFIG = {
             "cmd_opts": "--cmd-port %(cmdport)s --listen %(listen)s " +
             "--group %(group_path)s --state-file %(statefile)s --dispatcher %(dispatcher)s",
             "cmdport_range": "5100-5199",
-            "component_key": ["group", "host"],
+            "component_key": "group:host",
             "listen_port_range": "5262",
             "logfile": "/tmp/%(service)s_%(group)s.log"
         },
@@ -51,7 +51,7 @@ DEFAULT_CONFIG = {
             "--dbname \"%(dbname)s\" --host \"%(dbhost)s\" " +
             "--group %(group_path)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
             "cmdport_range": "5100-5199",
-            "component_key":  ["group", "host"],
+            "component_key":  "group:host",
             "listen_port_range": "5200-5299",
             "logfile": "/tmp/%(service)s_%(group)s.log"
         },
@@ -61,7 +61,7 @@ DEFAULT_CONFIG = {
             "cmd_opts": "--cmd-port %(cmdport)s --listen %(listen)s --log debug " +
             "--jobid %(jobid)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
             "cmdport_range": "5000-5999",
-            "component_key":  ["jobid"],
+            "component_key":  "jobid",
             "listen_port_range": "5300-5999",
             "logfile": "/tmp/%(service)s_%(jobid)s.log",
             "min_nodes": 4
@@ -87,8 +87,8 @@ DEFAULT_CONFIG = {
         "local_status": "ps --pid %(pid)d -o pid,wchan,cmd,args -ww | tail -1",
         "remote_status": "ssh %(host)s \"ps --pid %(pid)d -o pid,wchan,cmd,args -ww | tail -1\""
     },
-    "agg-templates": [],
-    "aggregate": []
+    "agg-templates": {},
+    "aggregate": {}
 }
 
 # default aggregation config

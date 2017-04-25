@@ -34,10 +34,12 @@ class EtcdClient(Client):
             for child in reply.leaves:
                 if child.key == path:
                     continue
-                child_key = child.key.split("/")[-1]
+                child_key = str(child.key.split("/")[-1])
                 result[child_key] = self.deserialize(child.key)
         else:
-            result = json.loads(str(reply.value))
+            if not reply.value:
+                reply.value = "{}"
+            result = json.loads(reply.value)
         return result
 
     def serialize(self, base_path="", obj=None):
@@ -47,12 +49,13 @@ class EtcdClient(Client):
         All values are JSON encoded.
         """
         if isinstance(obj, dict):
+            super(EtcdClient, self).write(base_path, None, dir=True)
             for key, value in obj.items():
                 path = base_path + "/" + key
                 self.serialize(path, value)
         else:
             etcd_file = json.dumps(obj)
-            super(EtcdClient, self).write(base_path, etcd_file)
+            super(EtcdClient, self).set(base_path, etcd_file)
 
     def update(self, path, new):
         """
@@ -125,16 +128,4 @@ class EtcdClient(Client):
         except Exception as e:
             raise e
         return res.key, json.loads(res.value)
-
-
-if __name__ == "__main__":
-    import pprint
-    from config import DEFAULT_CONFIG
-    client = EtcdClient()
-    pp = pprint.PrettyPrinter(indent=4)
-    pp.pprint(DEFAULT_CONFIG)
-    client.serialize(DEFAULT_CONFIG, "/config")
-    config = client.deserialize("/config")
-    pp.pprint(config)
-    print cmp(DEFAULT_CONFIG, config)
 
