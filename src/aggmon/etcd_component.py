@@ -30,6 +30,7 @@ def which(file):
 
 
 def component_key(keys, kwds):
+    keys = keys.split(":")
     key = []
     for k in keys:
         if k in kwds:

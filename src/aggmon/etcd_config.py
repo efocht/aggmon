@@ -25,11 +25,11 @@ DEFAULT_CONFIG = {
     },
     "hierarchy": {
         "monitor": {
-            "group0": {
+            "group": {
                 }
             },
         "job": {
-            "jobid0": {
+            "jobid": {
                 }
             }
     },
@@ -134,7 +134,10 @@ class Config(object):
             if cf is not None:
                 groups = cf.get("groups", None)
                 if isinstance(groups, dict):
-                    self._config["groups"].update(groups)
+                    for group in groups:
+                        self._config["groups"][group] = {}
+                        for htype, hosts in groups[group].items():
+                            self._config["groups"][group][htype] = [hosts[i] for i in sorted(hosts.keys())]
                 services = cf.get("services", None)
                 if isinstance(services, dict):
                     obj = services.get("collector", None)
@@ -161,18 +164,21 @@ class Config(object):
                 templates.update(tpl)
     
             agg = result.get("agg", None)
-            if isinstance(agg, list):
-                for a in agg:
+            if isinstance(agg, dict):
+                for k in sorted(agg.keys()):
+                    a = agg[k]
                     if isinstance(a, dict):
                         aggregate.append(a)
-    
+
         for agg in aggregate:
             tpl_names = agg.get("template", None)
             if tpl_names is None:
                 continue
             del agg["template"]
-            if not isinstance(tpl_names, list):
+            if not isinstance(tpl_names, dict):
                 tpl_names = (tpl_names,)
+            else:
+                tpl_names = tpl_names.values()
             orig_attrs = agg.copy()
             agg.clear()
             for tpl_name in tpl_names:
@@ -182,6 +188,13 @@ class Config(object):
                                     (tpl_name, f))
                 agg.update(tpl)
             agg.update(orig_attrs)
+            metrics = agg.get("metrics", None)
+            if metrics is None:
+                continue
+            orig_metrics = agg["metrics"].copy()
+            del agg["metrics"]
+            agg["metrics"] = [orig_metrics[k] for k in sorted(orig_metrics.keys())]
+
     
         self._config["aggregate"] = aggregate
 

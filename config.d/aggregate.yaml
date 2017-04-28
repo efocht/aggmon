@@ -1,16 +1,23 @@
 agg:
-    - template:        default
-      push_target:     "@TOP_STORE"
-      agg_metric_name: "%(metric)s_%(agg_type)s"
-      metrics:         [load_one]
-    - template:        [default,short-interval]
-      push_target:     "@TOP_STORE"
-      agg_metric_name: "%(metric)s_%(agg_type)s"
-      metrics:         [cpu_temp]
-    - push_target:     "@TOP_STORE"
-      agg_class:       job
-      interval:        180
-      agg_type:        quant10
-      ttl:             180
-      agg_metric_name: "%(metric)s_%(agg_type)s"
-      metrics:         RE:.*likwid.*
+    0:
+        template:        default
+        push_target:     "@TOP_STORE"
+        agg_metric_name: "%(metric)s_%(agg_type)s"
+        metrics:
+            0: load_one
+    1:
+        template:
+            0: default
+            1: short-interval
+        push_target:     "@TOP_STORE"
+        agg_metric_name: "%(metric)s_%(agg_type)s"
+        metrics:
+            0: cpu_temp
+    2:
+        push_target:     "@TOP_STORE"
+        agg_class:       job
+        interval:        180
+        agg_type:        quant10
+        ttl:             180
+        agg_metric_name: "%(metric)s_%(agg_type)s"
+        metrics:         RE:.*likwid.*
