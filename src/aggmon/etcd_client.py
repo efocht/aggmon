@@ -1,3 +1,5 @@
+# etcd client project on github:
+#    https://github.com/jplana/python-etcd
 from etcd import *
 from urllib3.exceptions import TimeoutError
 import json
