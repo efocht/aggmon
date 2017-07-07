@@ -30,6 +30,7 @@ from etcd_component import get_kwds, ComponentState
 from etcd_config import Config, DEFAULT_CONFIG_DIR
 from etcd_rpc import *
 from msg_tagger import MsgTagger
+from etcd import EtcdWatchTimedOut
 
 
 log = logging.getLogger( __name__ )
@@ -313,6 +314,8 @@ def test_pub():
         print "%-10s %d" % (k, v)
 
 
+JOB_HPATH = "/config/hierarchy/job/"
+
 def aggmon_collector(argv):
     global comp
 
@@ -428,12 +431,47 @@ def aggmon_collector(argv):
         msg = {"TARGET": pargs.listen}
         send_rpc(context, pargs.msgbus, "subscribe", **msg)
 
-    while True:
+    # list of jobs currently running
+    job_ids_cur = []
+    # list of jobs that run before last change
+    job_ids_old = []
+    run = True
+    while run:
         try:
             subq.join(0.1)
         except Exception as e:
-            print "main thread exception: %r" % e
+            log.error("main thread exception: %r" % e)
             break
+
+        try:
+            res = etcd_client.read(JOB_HPATH, recursive=True, wait=True, timeout=10)
+        except Exception as e:
+            if isinstance(e, EtcdWatchTimedOut):
+                continue
+            log.error("etcd exception: %s" % e)
+            run = False
+            continue
+
+        if not res.key:
+            log.debug("no jobs found")
+        else:
+            pass
+            print res
+            #job_ids_cur = [k for k, v in res._children]
+            #job_ids_new = set(job_ids_cur) - set(job_ids_old)
+            #job_ids_exp = set(job_ids_old) - set(job_ids_cur)
+            #log.debug("new: " + str(job_ids_new))
+            #log.debug("exp: " + str(job_ids_exp))
+
+        # TODO:
+        # job added?
+        #     get dobid
+        #     get list of hosts this job is using (format?)
+        #     are we collecting metrics from a node that is on the job's list of hosts?
+        #         msg = { "TAG_KEY": "jobid", TAG_VALUE: <jobid> }
+        #         call tagger.add_tag(msg)
+        # job disappeared?
+        #     call tagger.remove_tag(<jobid>)
 
 if __name__ == "__main__":
     aggmon_collector(sys.argv)

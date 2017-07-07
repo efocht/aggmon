@@ -22,7 +22,8 @@ class EtcdClient(Client):
             kwds["host"] = os.environ["ETCDHOST"]
             kwds["port"] = int(os.environ["ETCDPORT"])
         except:
-            pass
+            if "host" in kwds and "port" not in kwds:
+                kwds["port"] = 2379
         super(EtcdClient, self).__init__(**kwds)
 
     def deserialize(self, path):
