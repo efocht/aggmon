@@ -4,6 +4,7 @@
 # Manages subscriptions and matches messages according to them.
 #
 
+import atexit
 import argparse
 import logging
 import os
@@ -314,7 +315,7 @@ def test_pub():
         print "%-10s %d" % (k, v)
 
 
-JOB_HPATH = "/config/hierarchy/job/"
+JOB_HPATH = "/config/hierarchy/job"
 
 def aggmon_collector(argv):
     global comp
@@ -408,6 +409,7 @@ def aggmon_collector(argv):
 
     pubsub.start()
     subq.start()
+    atexit.register(join_threads, subq)
 
     etcd_client = EtcdClient()
     me_addr = own_addr_for_tgt("8.8.8.8")
@@ -431,20 +433,19 @@ def aggmon_collector(argv):
         msg = {"TARGET": pargs.listen}
         send_rpc(context, pargs.msgbus, "subscribe", **msg)
 
-    # list of jobs currently running
-    job_ids_cur = []
-    # list of jobs that run before last change
-    job_ids_old = []
     run = True
+    wait_index = 0
+    jobs = {} 
+    res = etcd_client.read(JOB_HPATH, recursive=True)
+    for job in res._children:
+        job_id = job["key"].split("/")[-1]
+        jobs[job_id] = job["value"]
+        log.debug("job with ID %s added" % job_id)
+        #wait_index = job["createdIndex"]
+    # TODO: fix race condition here, jobs added / removed between previous read and next read are not recognized
     while run:
         try:
-            subq.join(0.1)
-        except Exception as e:
-            log.error("main thread exception: %r" % e)
-            break
-
-        try:
-            res = etcd_client.read(JOB_HPATH, recursive=True, wait=True, timeout=10)
+            res = etcd_client.read(JOB_HPATH, recursive=True, wait=True, waitIndex=wait_index, timeout=10)
         except Exception as e:
             if isinstance(e, EtcdWatchTimedOut):
                 continue
@@ -452,26 +453,35 @@ def aggmon_collector(argv):
             run = False
             continue
 
-        if not res.key:
-            log.debug("no jobs found")
+        wait_index = res.modifiedIndex
+        action = res.action
+        #print wait_index, ":", res
+        if action == "set":
+            res = etcd_client.read(JOB_HPATH, recursive=True)
+            for job in res._children:
+                if job["createdIndex"] >= wait_index: 
+                    job_id = job["key"].split("/")[-1]
+                    jobs[job_id] = job["value"]
+                    log.debug("job with ID %s added" % job_id)
+                    # call tagger.add_tag(msg)
+        elif action == "delete":
+            job_id = res.key.split("/")[-1]
+            del jobs[job_id]
+            log.debug("job with ID %s removed" % job_id)
+            # call tagger.remove_tag(<jobid>)
         else:
-            pass
-            print res
-            #job_ids_cur = [k for k, v in res._children]
-            #job_ids_new = set(job_ids_cur) - set(job_ids_old)
-            #job_ids_exp = set(job_ids_old) - set(job_ids_cur)
-            #log.debug("new: " + str(job_ids_new))
-            #log.debug("exp: " + str(job_ids_exp))
+            log.warn("etcd action (%s) @ %s, index %d ignored" % (action, JOB_HPATH, wait_index))
+        log.debug("current jobs (%d): %s" % (wait_index, str(jobs)))
+        wait_index += 1
 
-        # TODO:
-        # job added?
-        #     get dobid
-        #     get list of hosts this job is using (format?)
-        #     are we collecting metrics from a node that is on the job's list of hosts?
-        #         msg = { "TAG_KEY": "jobid", TAG_VALUE: <jobid> }
-        #         call tagger.add_tag(msg)
-        # job disappeared?
-        #     call tagger.remove_tag(<jobid>)
+
+def join_threads(subq):
+    try:
+        subq.join(0.1)
+    except Exception as e:
+        log.error("main thread exception: %r" % e)
+    log.debug("leaving...")
+
 
 if __name__ == "__main__":
     aggmon_collector(sys.argv)
