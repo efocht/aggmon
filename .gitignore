@@ -69,6 +69,9 @@ lib64
 include
 .project
 
+# pycharm
+.idea
+
 # aggmon state files
 *.state
 
