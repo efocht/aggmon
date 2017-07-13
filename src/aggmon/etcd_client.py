@@ -2,8 +2,8 @@
 #    https://github.com/jplana/python-etcd
 from etcd import *
 from urllib3.exceptions import TimeoutError
-from etcd.exceptions import EtcdException
-from etcd.client import Client
+from etcd import EtcdException
+from etcd import Client
 import json
 import logging
 import os
