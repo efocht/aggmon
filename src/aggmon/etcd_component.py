@@ -1,4 +1,7 @@
+import json
 import logging
+import os
+import pdb
 import subprocess
 import time
 import traceback
@@ -144,7 +147,8 @@ class ComponentState(object):
     def send_state_update(self):
         try:
             # TODO: make sure the path exists. Could make sense to create paths in init().
-            return self.etcd_client.set(self.etcd_path + "/state", self.state)
+            return self.etcd_client.set(self.etcd_path + "/state", self.state,
+                                        ttl=int(self.ping_interval*1.3))
         except Exception as e:
             log.warning("Etcd error at state update: %r" % e)
 
@@ -155,7 +159,10 @@ class ComponentState(object):
 class ComponentDeadError(Exception):
     pass
 
-        
+#
+# The class below is here for reference. In the current etcd based code this should not be needed,
+# except for some of the methods which start and kill components.
+#
 class ComponentStatesRepo(object):
     """
     Component states repository: this is the place where component states are stored in etcd
