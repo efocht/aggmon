@@ -134,7 +134,7 @@ class ComponentState(object):
             path += "/" + component_type
         for r in self.etcd_client.read(path, recursive=True).children:
             if r.key.endswith("/state"):
-                yield r
+                yield self.etcd_client.get(r.key)
 
     def reset_timer(self, *__args, **__kwds):
         if self.timer is not None:
