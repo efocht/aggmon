@@ -16,22 +16,24 @@ DEFAULT_CONFIG_DIR = "../config.d"
 # default configuration data
 ##
 DEFAULT_CONFIG = {
-    "groups": {
-    #     "universe": {
-    #         "job_agg_nodes": ["localhost"],
-    #         "data_store_nodes" : ["localhost"],
-    #         "collector_nodes" : ["localhost"]
-    #     }
-    },
     "hierarchy": {
-        "monitor": {
-            "group": {
-                }
-            },
+        "group": {
+            # <flat_group_path> : {
+            #                       "nodes" : [...],
+            #                       "hpath" : <full hierarchy path string of this group> ## needed
+            # }
+        },
         "job": {
-            "jobid": {
-                }
-            }
+            # <jobid> : {
+            #             "nodes" : [...],
+            #             "hpath" : <full hierarchy path string> ## ?
+            # }
+        },
+        "monnodes": {
+            # <hostname> : {
+            #                "hpath" : <full hierarchy path string> ## ?
+            # }
+        }
     },
     "services": {
         "collector": {
