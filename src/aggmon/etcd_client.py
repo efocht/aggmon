@@ -139,6 +139,8 @@ class EtcdClient(Client):
         """
         Returns a list of the keys inside a path.
         """
+        if not path.endswith("/"):
+            path = path + "/"
         try:
             res = self.read(path, timeout=timeout)
         except TimeoutError:
@@ -147,7 +149,7 @@ class EtcdClient(Client):
             raise e
         if strip_parent:
             _lenpath = len(path)
-            out = [c.key[_lenpath + 1:] for c in res.children]
+            out = [c.key[_lenpath:] for c in res.children]
         else:
             out = [c.key for c in res.children]
         return out
