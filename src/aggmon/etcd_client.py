@@ -135,3 +135,20 @@ class EtcdClient(Client):
             raise e
         return res.key, json.loads(res.value)
 
+    def keys(self, path, strip_parent=False, timeout=None):
+        """
+        Returns a list of the keys inside a path.
+        """
+        try:
+            res = self.read(path, timeout=timeout)
+        except TimeoutError:
+            raise EtcTimeout
+        except Exception as e:
+            raise e
+        if strip_parent:
+            _lenpath = len(path)
+            out = [c.key[_lenpath + 1:] for c in res.children]
+        else:
+            out = [c.key for c in res.children]
+        return out
+
