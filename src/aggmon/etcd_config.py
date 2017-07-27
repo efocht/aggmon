@@ -1,16 +1,18 @@
 #!/usr/bin/python
 
-import etcd
 import json
 import logging
 import os
 import os.path
 import sys
+import time
 import traceback
+from etcd_client import *
 
 
 log = logging.getLogger( __name__ )
 DEFAULT_CONFIG_DIR = "../config.d"
+ETCD_CONFIG_ROOT = "/config"
 
 ##
 # default configuration data
@@ -105,13 +107,12 @@ DEFAULT_CONFIG = {
 
 
 class Config(object):
-    def __init__(self, config=DEFAULT_CONFIG, config_dir="."):
-        self._config = config
+    def __init__(self, etcd_client, config_dir="."):
         self._config_dir = config_dir
-        self.load_files()
+        self.etcd_client = etcd_client
+        self.init_etcd()
 
-
-    def load_files(self):
+    def load_files(self, config=DEFAULT_CONFIG):
         try:
             import yaml
         except ImportError as e:
@@ -129,7 +130,7 @@ class Config(object):
     
         templates = {}
         aggregate = []
-    
+
         for f in files:
             result = yaml.safe_load(open(f))
             cf = result.get("config", None)
@@ -137,29 +138,29 @@ class Config(object):
                 groups = cf.get("groups", None)
                 if isinstance(groups, dict):
                     for group in groups:
-                        self._config["groups"][group] = {}
+                        config["groups"][group] = {}
                         for htype, hosts in groups[group].items():
-                            self._config["groups"][group][htype] = [hosts[i] for i in sorted(hosts.keys())]
+                            config["groups"][group][htype] = [hosts[i] for i in sorted(hosts.keys())]
                 services = cf.get("services", None)
                 if isinstance(services, dict):
                     obj = services.get("collector", None)
                     if isinstance(obj, dict):
-                        self._config["services"]["collector"].update(obj)
+                        config["services"]["collector"].update(obj)
                     obj = services.get("data_store", None)
                     if isinstance(obj, dict):
-                        self._config["services"]["data_store"].update(obj)
+                        config["services"]["data_store"].update(obj)
                     obj = services.get("job_agg", None)
                     if isinstance(obj, dict):
-                        self._config["services"]["job_agg"].update(obj)
+                        config["services"]["job_agg"].update(obj)
                 database = cf.get("database", None)
                 if isinstance(database, dict):
-                    self._config["database"].update(database)
+                    config["database"].update(database)
                 resource_manager = cf.get("resource_manager", None)
                 if isinstance(resource_manager, dict):
-                    self._config["resource_manager"].update(resource_manager)
+                    config["resource_manager"].update(resource_manager)
                 glob = cf.get("global", None)
                 if isinstance(glob, dict):
-                    self._config["global"].update(glob)
+                    config["global"].update(glob)
     
             tpl = result.get("agg-templates", None)
             if isinstance(tpl, dict):
@@ -197,12 +198,14 @@ class Config(object):
             del agg["metrics"]
             agg["metrics"] = [orig_metrics[k] for k in sorted(orig_metrics.keys())]
 
-    
-        self._config["aggregate"] = aggregate
+        config["aggregate"] = aggregate
+        return config
 
-    def get(self, path):
-        """Get value in the config nested dicts, represent the "path" to the value
+    def _get_nested_dicts_path(self, path):
+        """
+        Get value in the config nested dicts, represent the "path" to the value
         like a file system path. Each element is a key.
+        This function is not used any more, it here only for reference.
         """
         if not path.startswith("/"):
             raise Exception("path '%s' does not start with /" % path)
@@ -215,3 +218,46 @@ class Config(object):
         log.debug("Config.get path=%s v=%r" % (path, d))
         return d
 
+    def get(self, path):
+        """
+        Get the content of a path inside the config in etcd as a
+        deserialized dict.
+        """
+        if not path.startswith("/"):
+            raise EtcdInvalidKey
+        if not path.startswith(ETCD_CONFIG_ROOT):
+            path = ETCD_CONFIG_ROOT + path
+        return self.etcd_client.deserialize(path)
+
+    def init_etcd(self):
+        """
+        Initialize etcd config with values loaded from config files.
+        The initialization process is potentially a race among multiple instances,
+        therefore only the first one which does not find the config base directory
+        will win and initialize the etcd tree.
+        """
+        try:
+            self.etcd_client.write(ETCD_CONFIG_ROOT, None, dir=True, prevExist=False)
+        except etcd.EtcdKeyAlreadyExists:
+            return False
+        config = self.load_files()
+        try:
+            self.etcd_client.serialize(ETCD_CONFIG_ROOT, config)
+        except Exception as e:
+            log.error("Failed to initialize config. %r" % e)
+            self.etcd_client.delete(ETCD_CONFIG_ROOT, recursive=True, dir=True)
+            return False
+        return True
+
+    def reinit_etcd(self):
+        """
+        Force re-initialization of the configuration. This should be done manually.
+        """
+        config = self.load_files()
+        try:
+            self.etcd_client.update(ETCD_CONFIG_ROOT, config)
+        except Exception as e:
+            log.error("Failed to initialize config. %r" % e)
+            return False
+        return True
+        
