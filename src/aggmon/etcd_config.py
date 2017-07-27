@@ -110,7 +110,6 @@ class Config(object):
     def __init__(self, etcd_client, config_dir="."):
         self._config_dir = config_dir
         self.etcd_client = etcd_client
-        self.init_etcd()
 
     def load_files(self, config=DEFAULT_CONFIG):
         try:
