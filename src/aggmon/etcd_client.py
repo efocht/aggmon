@@ -3,7 +3,7 @@
 from etcd import *
 from urllib3.exceptions import TimeoutError
 from etcd import EtcdException
-from etcd import Client
+from etcd import Client, EtcdKeyNotFound
 import json
 import logging
 import os
@@ -15,8 +15,14 @@ log = logging.getLogger( __name__ )
 class EtcdQueueEmpty(EtcdException):
     pass
 
+
 class EtcdTimeout(EtcdException):
     pass
+
+
+class EtcdInvalidKey(EtcdException):
+    pass
+
 
 class EtcdClient(Client):
     def __init__(self, **kwds):
@@ -34,7 +40,7 @@ class EtcdClient(Client):
         Return directory/key-value hierarchy as a hierarchy of nested dicts.
         """
         result = None
-        reply = super(EtcdClient, self).read(path)
+        reply = self.read(path)
         if reply.dir:
             result = dict()
             for child in reply.leaves:
@@ -55,13 +61,12 @@ class EtcdClient(Client):
         All values are JSON encoded.
         """
         if isinstance(obj, dict):
-            super(EtcdClient, self).write(base_path, None, dir=True)
+            self.write(base_path, None, dir=True)
             for key, value in obj.items():
                 path = base_path + "/" + key
                 self.serialize(path, value)
         else:
-            etcd_file = json.dumps(obj)
-            super(EtcdClient, self).set(base_path, etcd_file)
+            self.set(base_path, obj)
 
     def update(self, path, new):
         """
@@ -70,40 +75,45 @@ class EtcdClient(Client):
         New keys will be added, missing keys will be deleted, therefore the API
         is different from what a dict().update() does!
         """
-        old = self.deserialize(path)
+        old_exists = True
+        try:
+            old = self.deserialize(path)
+        except EtcdKeyNotFound:
+            old_exists = False
 
         if not isinstance(new, dict):
-            if isinstance(old, dict):
-                super(EtcdClient, self).delete(path, recursive=True, dir=True)
+            if old_exists and isinstance(old, dict):
+                self.delete(path, recursive=True, dir=True)
             if old != new:
                 # new is not a dict: simply serialize it
                 value = json.dumps(new)
-                super(EtcdClient, self).write(path, value)
+                self.write(path, value)
         else:
-            if not isinstance(old, dict):
-                super(EtcdClient, self).delete(path, recursive=True, dir=True)
-            else:
-                # - are any keys in old to be deleted?
-                for key in set(old.keys()) - set(new.keys()):
-                    super(EtcdClient, self).delete(path + "/" + key, recursive=True, dir=True)
-                    del old[key]
-                # - are there new keys?
-                for key in set(new.keys()) - set(old.keys()):
-                    self.serialize(path + "/" + key, new[key])
-                    del new[key]
+            if old_exists:
+                if not isinstance(old, dict):
+                    self.delete(path, recursive=True, dir=True)
+                else:
+                    # - are any keys in old to be deleted?
+                    for key in set(old.keys()) - set(new.keys()):
+                        self.delete(path + "/" + key, recursive=True, dir=True)
+                        del old[key]
+                    # - are there new keys?
+                    for key in set(new.keys()) - set(old.keys()):
+                        self.serialize(path + "/" + key, new[key])
+                        del new[key]
             for key, value in new.items():
                 self.update(path + "/" + key, value)
 
-    def get(self, key):
-        res = super(EtcdClient, self).get(key)
+    def get(self, key, **kwargs):
+        res = self.read(key, **kwargs)
         val = None
         if not res.dir:
             val = json.loads(res.value)
         return val
 
-    def set(self, key, val, ttl=None):
+    def set(self, key, val, **kwargs):
         json_val = json.dumps(val)
-        return super(EtcdClient, self).set(key, json_val, ttl=ttl)
+        return self.write(key, json_val, **kwargs)
 
     def qput(self, qkey, val):
         """
