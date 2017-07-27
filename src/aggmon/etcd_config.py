@@ -251,9 +251,14 @@ class Config(object):
 
     def reinit_etcd(self):
         """
-        Force re-initialization of the configuration. This should be done manually.
+        Force re-initialization of the configuration while keeping the
+        externally controlled hierarchy unmodified.
+        This should be only triggered manually.
+
         """
         config = self.load_files()
+        hierarchy = self.etcd_client.deserialize(ETCD_CONFIG_ROOT + "/hierarchy")
+        config["hierarchy"] = hierarchy
         try:
             self.etcd_client.update(ETCD_CONFIG_ROOT, config)
         except Exception as e:
