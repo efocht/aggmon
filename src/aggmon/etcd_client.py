@@ -54,7 +54,7 @@ class EtcdClient(Client):
             result = json.loads(reply.value)
         return result
 
-    def serialize(self, base_path="", obj=None):
+    def serialize(self, base_path="", obj=None, **kwargs):
         """
         Serialize a nested structure of dicts into an etcd directory tree.
         Objects of type dict within the config will be serialized as directories.
@@ -64,11 +64,11 @@ class EtcdClient(Client):
             self.write(base_path, None, dir=True)
             for key, value in obj.items():
                 path = base_path + "/" + key
-                self.serialize(path, value)
+                self.serialize(path, value, **kwargs)
         else:
-            self.set(base_path, obj)
+            self.set(base_path, obj, **kwargs)
 
-    def update(self, path, new):
+    def update(self, path, new, **kwargs):
         """
         Update the etcd directory/key-value hierarchy at _path_ according to the
         object _new_ passed in as argument. Do this with minimal operations.
@@ -80,6 +80,7 @@ class EtcdClient(Client):
             old = self.deserialize(path)
         except EtcdKeyNotFound:
             old_exists = False
+            old = None
 
         if not isinstance(new, dict):
             if old_exists and isinstance(old, dict):
@@ -87,7 +88,10 @@ class EtcdClient(Client):
             if old != new:
                 # new is not a dict: simply serialize it
                 value = json.dumps(new)
-                self.write(path, value)
+                self.write(path, value, **kwargs)
+            else:
+                if "ttl" in kwargs:
+                    self.refresh(path, kwargs["ttl"])
         else:
             if old_exists:
                 if not isinstance(old, dict):
@@ -99,10 +103,10 @@ class EtcdClient(Client):
                         del old[key]
                     # - are there new keys?
                     for key in set(new.keys()) - set(old.keys()):
-                        self.serialize(path + "/" + key, new[key])
+                        self.serialize(path + "/" + key, new[key], **kwargs)
                         del new[key]
             for key, value in new.items():
-                self.update(path + "/" + key, value)
+                self.update(path + "/" + key, value, **kwargs)
 
     def get(self, key, **kwargs):
         res = self.read(key, **kwargs)
