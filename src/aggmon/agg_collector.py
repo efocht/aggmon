@@ -261,31 +261,6 @@ class SubscriberQueue(threading.Thread):
 
 
 
-def load_state(name):
-    try:
-        fp = open(name)
-        state = pickle.load(fp)
-        fp.close()
-    except Exception as e:
-        print "Exception in AggConfig load '%s': %r" % (name, e)
-        return []
-    return state
-
-def save_state(name, state):
-    """
-    'name' is the filename where to store the state
-    'state' is a list of objects to be saved
-    """
-    try:
-        fp = open(name, "w")
-        pickle.dump(state, fp)
-        fp.close()
-    except Exception as e:
-        print "Exception in AggConfig save '%s': %r" % (name, e)
-        return False
-    return True
-
-
 def test_pub():
     """
     Test for publisher matcher mechanism
@@ -321,8 +296,6 @@ def aggmon_collector(argv):
     global comp
 
     ap = argparse.ArgumentParser()
-    ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR,
-                    action="store", help="configuration directory")
     ap.add_argument('-H', '--hierarchy-url', default="", action="store",
                     help="position in hierarchy for this component, eg. group:/universe")
     ap.add_argument('-l', '--log', default="info", action="store",
@@ -345,8 +318,6 @@ def aggmon_collector(argv):
         log.error("No hierarchy URL provided for this component. Use the -H option!")
         sys.exit(1)
     
-    config = Config(config_dir=pargs.config)
-
     state = []
     subs = {}
     tags = {}
@@ -387,11 +358,6 @@ def aggmon_collector(argv):
                         pass
         return msg
 
-    def save_subs_tags(msg):
-        # EF 6.7.16 disabled state saving
-        #save_state(pargs.state_file, [pubsub.subs, tagger.tags])
-        pass
-
     def quit(msg):
         subq.stopping = True
         # raw exit for now
@@ -412,18 +378,20 @@ def aggmon_collector(argv):
     atexit.register(join_threads, subq)
 
     etcd_client = EtcdClient()
+    config = Config(etcd_client)
+
     me_addr = own_addr_for_tgt("8.8.8.8")
     me_listen = "tcp://%s:%d" % (me_addr, subq.port)
     state = get_kwds(listen=me_listen)
 
     comp = ComponentState(etcd_client, "collector", pargs.hierarchy_url, state=state)
-    comp.rpc.register_rpc("subscribe", pubsub.subscribe, post=save_subs_tags)
-    comp.rpc.register_rpc("unsubscribe", pubsub.unsubscribe, post=save_subs_tags)
+    comp.rpc.register_rpc("subscribe", pubsub.subscribe)
+    comp.rpc.register_rpc("unsubscribe", pubsub.unsubscribe)
     comp.rpc.register_rpc("show_subs", pubsub.show_subscriptions)
-    comp.rpc.register_rpc("reset_subs", pubsub.reset_subscriptions, post=save_subs_tags)
-    comp.rpc.register_rpc("add_tag", tagger.add_tag, post=save_subs_tags)
-    comp.rpc.register_rpc("remove_tag", tagger.remove_tag, post=save_subs_tags)
-    comp.rpc.register_rpc("reset_tags", tagger.reset_tags, post=save_subs_tags)
+    comp.rpc.register_rpc("reset_subs", pubsub.reset_subscriptions)
+    comp.rpc.register_rpc("add_tag", tagger.add_tag)
+    comp.rpc.register_rpc("remove_tag", tagger.remove_tag)
+    comp.rpc.register_rpc("reset_tags", tagger.reset_tags)
     comp.rpc.register_rpc("show_tags", tagger.show_tags)
     comp.rpc.register_rpc("quit", quit, early_reply=True)
     comp.rpc.register_rpc("resend_state", comp.reset_timer)
