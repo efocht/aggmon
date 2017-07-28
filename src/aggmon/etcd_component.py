@@ -147,12 +147,15 @@ class ComponentState(object):
     def send_state_update(self):
         try:
             # TODO: make sure the path exists. Could make sense to create paths in init().
-            return self.etcd_client.set(self.etcd_path + "/state", self.state,
-                                        ttl=int(self.ping_interval*1.3))
+            return self.etcd_client.update(self.etcd_path + "/state", self.state,
+                                           ttl=int(self.ping_interval*1.3))
         except Exception as e:
             log.warning("Etcd error at state update: %r" % e)
 
     def update(self, state):
+        """
+        Update the internal state.
+        """
         self.state.update(state)
 
 
