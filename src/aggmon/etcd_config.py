@@ -46,7 +46,8 @@ DEFAULT_CONFIG = {
             "cmdport_range": "5100-5199",
             "component_key": "group:host",
             "listen_port_range": "5262",
-            "logfile": "/tmp/%(service)s_%(group)s.log"
+            "logfile": "/tmp/%(service)s_%(group)s.log",
+            "per_group": True
         },
         "data_store": {
             "cwd": os.getcwd(),
@@ -57,7 +58,8 @@ DEFAULT_CONFIG = {
             "cmdport_range": "5100-5199",
             "component_key":  "group:host",
             "listen_port_range": "5200-5299",
-            "logfile": "/tmp/%(service)s_%(group)s.log"
+            "logfile": "/tmp/%(service)s_%(group)s.log",
+            "per_group": True
         },
         "job_agg": {
             "cwd": os.getcwd(),
@@ -68,7 +70,8 @@ DEFAULT_CONFIG = {
             "component_key":  "jobid",
             "listen_port_range": "5300-5999",
             "logfile": "/tmp/%(service)s_%(jobid)s.log",
-            "min_nodes": 4
+            "min_nodes": 4,
+            "per_job": True
         }
     },
     "database": {

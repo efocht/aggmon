@@ -446,7 +446,7 @@ def aggmon_collector(argv):
     run = True
     while run:
         # jobs configured in hierachy
-        jobs_config = config.get("/job")
+        jobs_config = config.get("/hierarchy/job")
         # jobs the tagger currently cares about
         jobs_tagger = [x[2:] for x in tagger.tags.keys() if x.startswith("J:")]
         # 
