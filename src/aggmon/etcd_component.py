@@ -92,7 +92,10 @@ class ComponentState(object):
     """
     Component side state.
     A timer is instantiated and sends component state information periodically.
-    The state itself is in the dict "state".
+    The state is in the dict "state" and is periodically serialized into etcd
+    eg. /component/group/universe_rack1/state.
+    Data that should be saved across restarts of the component is stored upon
+    request.
     """
     this = None
 
@@ -146,17 +149,38 @@ class ComponentState(object):
 
     def send_state_update(self):
         try:
-            # TODO: make sure the path exists. Could make sense to create paths in init().
             return self.etcd_client.update(self.etcd_path + "/state", self.state,
                                            ttl=int(self.ping_interval*1.3))
         except Exception as e:
             log.warning("Etcd error at state update: %r" % e)
 
-    def update(self, state):
+    def update_state(self, state):
         """
         Update the internal state.
         """
         self.state.update(state)
+
+    def set_data(self, path, data):
+        """
+        Store component data.
+        """
+        if not path.startswith("/"):
+            path = "/" + path
+        try:
+            return self.etcd_client.update(self.etcd_path + "/data" + path, data)
+        except Exception as e:
+            log.warning("Etcd error while saving data (%s): %r" % (path, e))
+
+    def get_data(self, path):
+        """
+        Retrieve component data.
+        """
+        if not path.startswith("/"):
+            path = "/" + path
+        try:
+            return self.etcd_client.deserialize(self.etcd_path + "/data" + path)
+        except Exception as e:
+            log.warning("Etcd error while retrieving data (%s): %r" % (path, e))
 
 
 class ComponentDeadError(Exception):
