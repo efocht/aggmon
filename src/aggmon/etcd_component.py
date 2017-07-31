@@ -126,10 +126,21 @@ class ComponentState(object):
         self.state["ping_interval"] = self.ping_interval
         self.state["rpc_path"] = self.etcd_path + "/rpc"
         self.timer = None
-        self.reset_timer()
         ComponentState.this = self
         self.rpc = RPCThread(etcd_client, self.etcd_path + "/rpc")
-        self.rpc.start()
+
+    def get_data(self, path):
+        """
+        Retrieve component data.
+        """
+        if not path.startswith("/"):
+            path = "/" + path
+        try:
+            return self.etcd_client.deserialize(self.etcd_path + "/data" + path)
+        except EtcdKeyNotFound:
+            return None
+        except Exception as e:
+            log.warning("Etcd error while retrieving data (%s): %r" % (path, e))
 
     def iter_components_state(self, component_type=None):
         path = ETCD_COMPONENT_PATH
@@ -154,12 +165,6 @@ class ComponentState(object):
         except Exception as e:
             log.warning("Etcd error at state update: %r" % e)
 
-    def update_state(self, state):
-        """
-        Update the internal state.
-        """
-        self.state.update(state)
-
     def set_data(self, path, data):
         """
         Store component data.
@@ -171,16 +176,15 @@ class ComponentState(object):
         except Exception as e:
             log.warning("Etcd error while saving data (%s): %r" % (path, e))
 
-    def get_data(self, path):
+    def start(self):
+        self.rpc.start()
+        self.reset_timer()
+
+    def update_state(self, state):
         """
-        Retrieve component data.
+        Update the internal state.
         """
-        if not path.startswith("/"):
-            path = "/" + path
-        try:
-            return self.etcd_client.deserialize(self.etcd_path + "/data" + path)
-        except Exception as e:
-            log.warning("Etcd error while retrieving data (%s): %r" % (path, e))
+        self.state.update(state)
 
 
 class ComponentDeadError(Exception):
