@@ -35,7 +35,27 @@ from etcd import EtcdWatchTimedOut
 
 
 log = logging.getLogger( __name__ )
-component = None
+# The component object is global
+comp = None
+
+#
+# Helper functions
+#
+def convert_str_int_float(msg):
+    # convert string values to int or float
+    if "V" in msg:
+        val = msg["V"]
+        if isinstance(val, basestring):
+            if val.isdigit():
+                val = int(val)
+                msg["V"] = val
+            else:
+                try:
+                    val = float(val)
+                    msg["V"] = val
+                except ValueError:
+                    pass
+    return msg
 
 
 class AggPubMatch(object):
@@ -46,6 +66,7 @@ class AggPubMatch(object):
     in the message. If the value matches as well, the subscriber will receive
     the message. If the value string starts with "RE:" then the rest of the string
     is regarded as regular expression match string.
+    Subscribing with an empty dict means: match all messages.
     """
     def __init__(self, zmq_context, subs={}):
         self.zmq_context = zmq_context
@@ -56,6 +77,21 @@ class AggPubMatch(object):
             for target in subs.keys():
                 sock = self.zmq_context.socket(zmq.PUSH)
                 self.send_socket[target] = sock
+
+    @staticmethod
+    def _eq_msg_sub(msg, sub):
+        # compare msg with subscription dict
+        equal = True
+        for k, v in msg.items():
+            if k not in sub:
+                equal = False
+                break
+            if sub[k]["s"] != v:
+                equal = False
+                break
+        if equal and len(set(sub.keys()) - set(msg.keys())) > 0:
+            equal = False
+        return equal
 
     def publish(self, msg):
         jmsg = json.dumps(msg)
@@ -113,12 +149,18 @@ class AggPubMatch(object):
         target = msg["TARGET"]
         del msg["TARGET"]
         if target in self.subs:
-            del self.subs[target]
-            if target in self.send_socket:
-                self.send_socket[target].close()
-                del self.send_socket[target]
-            if target in self.socket_conn:
-                del self.socket_conn[target]
+            if len(msg) > 0:
+                for i in xrange(len(self.subs[target])):
+                    sub = self.subs[target][i]
+                    if self._eq_msg_sub(msg, sub):
+                        del self.subs[target][i]
+            if len(msg) == 0 or (len(msg) > 0 and len(self.subs[target]) == 0):
+                del self.subs[target]
+                if target in self.send_socket:
+                    self.send_socket[target].close()
+                    del self.send_socket[target]
+                if target in self.socket_conn:
+                    del self.socket_conn[target]
 
     def match(self, msg):
         """
@@ -260,7 +302,6 @@ class SubscriberQueue(threading.Thread):
         log.info("%d messages received" % count)
 
 
-
 def test_pub():
     """
     Test for publisher matcher mechanism
@@ -318,17 +359,6 @@ def aggmon_collector(argv):
         log.error("No hierarchy URL provided for this component. Use the -H option!")
         sys.exit(1)
     
-    state = []
-    subs = {}
-    tags = {}
-
-    # EF 6.7.16 disabled state loading
-    #if len(pargs.state_file) > 0:
-    #    state = load_state(pargs.state_file)
-    if len(state) >= 2:
-        subs = state[0]
-        tags = state[1]
-
     def spoofed_host(msg):
         # treat spoofed hosts already here
         if "H" in msg and ":" in msg["H"]:
@@ -342,32 +372,23 @@ def aggmon_collector(argv):
         #    log.info("cpu_user val: %r" % msg)
         return msg
 
-    def convert_str_int_float(msg):
-        # convert string values to int or float
-        if "V" in msg:
-            val = msg["V"]
-            if isinstance(val, basestring):
-                if val.isdigit():
-                    val = int(val)
-                    msg["V"] = val
-                else:
-                    try:
-                        val = float(val)
-                        msg["V"] = val
-                    except ValueError:
-                        pass
-        return msg
+    etcd_client = EtcdClient()
+    config = Config(etcd_client)
+    comp = ComponentState(etcd_client, "collector", pargs.hierarchy_url, state=state)
 
-    def quit(msg):
-        subq.stopping = True
-        # raw exit for now
-        os._exit(0)
+    state = {}
+    saved_subs = comp.get_data("/subs")
+    if saved_subs is None:
+        saved_subs = {}
+    saved_tags = comp.get_data("/tags")
+    if saved_tags is None:
+        saved_tags = {}
 
     try:
         context = zmq.Context()
         subq = SubscriberQueue(context, pargs.listen, pre=[spoofed_host, convert_str_int_float])
-        tagger = MsgTagger(tags=tags)
-        pubsub = AggPubThread(context, subq.queue, subs=subs, tagger=tagger.do_tag)
+        tagger = MsgTagger(tags=saved_tags)
+        pubsub = AggPubThread(context, subq.queue, subs=saved_subs, tagger=tagger.do_tag)
     except Exception as e:
         log.error(traceback.format_exc())
         log.error("Failed to initialize something essential. Exiting.")
@@ -375,23 +396,35 @@ def aggmon_collector(argv):
 
     pubsub.start()
     subq.start()
+    comp.start()
     atexit.register(join_threads, subq)
-
-    etcd_client = EtcdClient()
-    config = Config(etcd_client)
 
     me_addr = own_addr_for_tgt("8.8.8.8")
     me_listen = "tcp://%s:%d" % (me_addr, subq.port)
     state = get_kwds(listen=me_listen)
+    comp.update_state(state)
 
-    comp = ComponentState(etcd_client, "collector", pargs.hierarchy_url, state=state)
-    comp.rpc.register_rpc("subscribe", pubsub.subscribe)
-    comp.rpc.register_rpc("unsubscribe", pubsub.unsubscribe)
+    #
+    # RPC functions and helpers
+    #
+    def quit(msg):
+        subq.stopping = True
+        # raw exit for now
+        os._exit(0)
+
+    def save_subs_data(msg):
+        comp.set_data("/subs", pubsub.subs)
+
+    def save_tags_data(msg):
+        comp.set_data("/tags", tagger.tags)
+
+    comp.rpc.register_rpc("subscribe", pubsub.subscribe, post=save_subs_data)
+    comp.rpc.register_rpc("unsubscribe", pubsub.unsubscribe, post=save_subs_data)
     comp.rpc.register_rpc("show_subs", pubsub.show_subscriptions)
-    comp.rpc.register_rpc("reset_subs", pubsub.reset_subscriptions)
-    comp.rpc.register_rpc("add_tag", tagger.add_tag)
-    comp.rpc.register_rpc("remove_tag", tagger.remove_tag)
-    comp.rpc.register_rpc("reset_tags", tagger.reset_tags)
+    comp.rpc.register_rpc("reset_subs", pubsub.reset_subscriptions, post=save_subs_data)
+    comp.rpc.register_rpc("add_tag", tagger.add_tag, post=save_tags_data)
+    comp.rpc.register_rpc("remove_tag", tagger.remove_tag, post=save_tags_data))
+    comp.rpc.register_rpc("reset_tags", tagger.reset_tags, post=save_tags_data))
     comp.rpc.register_rpc("show_tags", tagger.show_tags)
     comp.rpc.register_rpc("quit", quit, early_reply=True)
     comp.rpc.register_rpc("resend_state", comp.reset_timer)
@@ -401,46 +434,39 @@ def aggmon_collector(argv):
         msg = {"TARGET": pargs.listen}
         send_rpc(context, pargs.msgbus, "subscribe", **msg)
 
-    run = True
-    wait_index = 0
-    jobs = {} 
-    res = etcd_client.read(JOB_HPATH, recursive=True)
-    for job in res._children:
-        job_id = job["key"].split("/")[-1]
-        jobs[job_id] = job["value"]
-        log.debug("job with ID %s added" % job_id)
-        #wait_index = job["createdIndex"]
-    # TODO: fix race condition here, jobs added / removed between previous read and next read are not recognized
-    while run:
-        try:
-            res = etcd_client.read(JOB_HPATH, recursive=True, wait=True, waitIndex=wait_index, timeout=10)
-        except Exception as e:
-            if isinstance(e, EtcdWatchTimedOut):
-                continue
-            log.error("etcd exception: %s" % e)
-            run = False
-            continue
+    ########################################################
+    # main collector configuration/hierarchy update logic
+    # ------------------
+    # - gather jobs hierarchy info
+    # - compare with tagger config and fixup
+    # - subscription removal for useless per_job components
+    ########################################################
 
-        wait_index = res.modifiedIndex
-        action = res.action
-        #print wait_index, ":", res
-        if action == "set":
-            res = etcd_client.read(JOB_HPATH, recursive=True)
-            for job in res._children:
-                if job["createdIndex"] >= wait_index: 
-                    job_id = job["key"].split("/")[-1]
-                    jobs[job_id] = job["value"]
-                    log.debug("job with ID %s added" % job_id)
-                    # call tagger.add_tag(msg)
-        elif action == "delete":
-            job_id = res.key.split("/")[-1]
-            del jobs[job_id]
-            log.debug("job with ID %s removed" % job_id)
-            # call tagger.remove_tag(<jobid>)
-        else:
-            log.warn("etcd action (%s) @ %s, index %d ignored" % (action, JOB_HPATH, wait_index))
-        log.debug("current jobs (%d): %s" % (wait_index, str(jobs)))
-        wait_index += 1
+    nsleep = 10
+    run = True
+    while run:
+        # jobs configured in hierachy
+        jobs_config = config.get("/job")
+        # jobs the tagger currently cares about
+        jobs_tagger = [x[2:] for x in tagger.tags.keys() if x.startswith("J:")]
+        # 
+        # remove tags for closed jobs
+        #
+        for jobid set(jobs_tagger) - set(jobs_config):
+            tagger.remove_tag(get_kwds(TAG_KEY="J", TAG_VALUE=jobid))
+            #
+            # unsubscribe subscribers with this job ID
+            #
+            targets = pubsub.match({"J": jobid})
+            for target in targets:
+                pubsub.unsubscribe({"TARGET": target, "J": jobid})
+        #
+        # sleep a while
+        #
+        sleep = nsleep
+        while sleep > 0:
+            sleep -= 1
+            time.sleep(1)
 
 
 def join_threads(subq):
