@@ -89,10 +89,8 @@ DEFAULT_CONFIG = {
     },
     "global": {
         "local_cmd"  : "cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &",
-        "remote_cmd" : "ssh %(host)s \"cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &\"",
-        "remote_kill": "ssh %(host)s kill %(pid)d",
-        "local_status": "ps --pid %(pid)d -o pid,wchan,cmd,args -ww | tail -1",
-        "remote_status": "ssh %(host)s \"ps --pid %(pid)d -o pid,wchan,cmd,args -ww | tail -1\""
+        "local_kill": "kill %(pid)d",
+        "local_status": "ps --pid %(pid)d -o pid,wchan,cmd,args -ww | tail -1"
     },
     "agg-templates": {},
     "aggregate": {}

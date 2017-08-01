@@ -205,17 +205,17 @@ class ComponentDeadError(Exception):
     pass
 
 #
-# The class below is here for reference. In the current etcd based code this should not be needed,
-# except for some of the methods which start and kill components.
+# Component control
+# 
 #
-class ComponentStatesRepo(object):
+class ComponentControl(object):
     """
     Component states repository: this is the place where component states are stored in etcd
     """
-    def __init__(self, config, etcd_client):
+    def __init__(self, config, etcd_client, comp_state):
         self.etcd_client = etcd_client
-        #self.repo = {}            # not needed any more, data is in etcd
         self.config = config
+        self.comp_state = comp_state
         self.component_start_cb = {}
         self.component_kill_cb = {}
 
@@ -229,12 +229,7 @@ class ComponentStatesRepo(object):
         join the aggregators). It could be renamed to 'service', to be consistent with
         the config, or we could rename service to component_type in the config. (TODO!)
 
-        'hierarchy' is the hierarchy name this component is working on.
-
-        'hierarchy_key' is the shard key for the flattened hierarchy corresponding to the
-        place where the comnponent is positioned. For the monitoring hierarchy this is the
-        flattened group. For the job hierarchy it is the job ID. Further details on the hierarchy
-        are in the /config/hierarchy/<hierarchy_key> value.
+        'hierarchy_url' specifies location of component in a certain hierarchy.
 
         """
         hierarchy, hierarchy_key, hierarchy_path = hierarchy_from_url(hierarchy_url)
@@ -253,7 +248,6 @@ class ComponentStatesRepo(object):
             listen = "tcp://0.0.0.0:%s" % svc_info["listen_port_range"]
         if "logfile" in svc_info:
             logfile = svc_info["logfile"] % locals()
-        state_file = "/tmp/state_%(service)s_%(hierarchy)s_%(hierarchy_key)s" % locals()
         # register callback
         if __CALLBACK is not None:
             key = service + ":" + hierarchy_url
@@ -336,15 +330,14 @@ class ComponentStatesRepo(object):
             res = True
             try:
                 log.info("attempting hard-kill of pid %d" % state["pid"])
-                exec_cmd = self.config.get("/global/remote_kill") % state
+                exec_cmd = self.config.get("/global/local_kill") % state
                 out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
-                #send_rpc(self.zmq_context, self.dispatcher, "del_component_state", **msg)
                 log.debug("kill_component (kill) res=%r" % res)
             except Exception as e:
                 log.error("subprocess error when running '%s' : '%r'" % (exec_cmd, e))
-        if res:
-            res = self.del_state(msg)
-            log.debug("kill_component deleting state %r" % res)
+        #if res:
+        #    res = self.del_state(msg)
+        #    log.debug("kill_component deleting state %r" % res)
         return res
 
 
@@ -484,57 +477,6 @@ class ComponentStatesRepo(object):
             if reply is not None:
                 res = True
         return res
-
-    def load_state(self, state_file):
-        """
-        Load component state from disk or database.
-        Parameters:
-        state_file: the file name where the state is saved
-        """
-        if not os.path.exists(state_file):
-            return None
-        log.info("load_state from %s" % state_file)
-        try:
-            fp = open(state_file)
-            loaded = json.load(fp)
-            fp.close()
-        except Exception as e:
-            log.error("Exception in state load '%s': %r" % (state_file, e))
-            return None
-
-        log.debug("loaded: %r" % loaded)
-        if len(loaded) == 0 or len(loaded[0]) == 0:
-            return None
-        loaded_state = loaded[0]
-        if len(loaded_state) == 0:
-            return None
-        #
-        # request resend of state from all components
-        for component, compval in loaded_state.items():
-            self.repo[component] = compval
-            for ckey, cstate in compval.items():
-                # set the "outdated!" attribute
-                # it will disappear if the component sends a component update message
-                # thus it is used for marking non-working components
-                self.repo[component][ckey]["outdated!"] = True
-        return True
-
-    def save_state(self, __msg, state_file):
-        """
-        Save component state to disk (or database).
-        Parameters:
-        __msg: ignored
-        state_file: path to state file
-        """
-        log.debug("save_state to %s" % state_file)
-        try:
-            fp = open(state_file, "w")
-            json.dump([self.repo], fp)
-            fp.close()
-        except Exception as e:
-            log.error("Exception in state save '%s': %r" % (state_file, e))
-            return False
-        return True
 
     def component_wait_timeout(self, component, num, timeout=120):
         """
