@@ -142,6 +142,20 @@ class ComponentState(object):
         except Exception as e:
             log.warning("Etcd error while retrieving data (%s): %r" % (path, e))
 
+    @staticmethod
+    def get_state(self, component_type, hierarchy_url):
+        """
+        Retrieve component instance state.
+        """
+        hierarchy, component_id, hierarchy_path = hierarchy_from_url(hierarchy_url)
+        path = "/".join([ETCD_COMPONENT_PATH, component_type, hierarchy, component_id, "state"])
+        try:
+            return self.etcd_client.deserialize(path)
+        except EtcdKeyNotFound:
+            return None
+        except Exception as e:
+            log.warning("Etcd error while retrieving state (%s): %r" % (path, e))
+
     def iter_components_state(self, component_type=None):
         path = ETCD_COMPONENT_PATH
         if component_type is not None:
