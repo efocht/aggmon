@@ -21,7 +21,7 @@ except ImportError:
 
 from Queue import Queue, Empty
 from agg_helpers import *
-from etcd_component import get_kwds, ComponentState
+from etcd_component import get_kwds, ComponentState, ComponentControl
 from etcd_config import Config, DEFAULT_CONFIG_DIR
 from etcd_rpc import *
 from msg_tagger import MsgTagger
@@ -92,11 +92,11 @@ def aggmon_control(argv):
 
     # groups for which this controller is responsible
     own_groups_hpath = pargs.group
-    own_groups_keys = []
+    own_groups_keys = {}
     groups_config = config.get("/hierarchy/group")
     for group_key, gv in groups_config.items():
         if gv["hpath"] in own_groups_hpath:
-            own_groups_keys.append(group_key)
+            own_groups_keys[gv["hpath"]] = group_key
 
     state = {}
 
@@ -121,6 +121,8 @@ def aggmon_control(argv):
     #comp.rpc.register_rpc("show_groups", show_groups)
     comp.rpc.register_rpc("quit", quit, early_reply=True)
 
+    control = ComponentControl(config, etcd_client, comp)
+
     #########################################################
     # Main control logic
     #
@@ -128,6 +130,7 @@ def aggmon_control(argv):
     # - check per_job subscribers and remove accordingly
 
     running = True
+    kill_services = False
     while (running):
         #
         # get hierarchies info
@@ -136,7 +139,10 @@ def aggmon_control(argv):
         groups_config = config.get("/hierarchy/group")
         services_config = config.get("/services")
 
+        # TODO
         own_jobids = filter_group_jobs(jobs_config, own_groups_hpath)
+
+        # previous state of own jobs list
         
         # loop over services
         for svc_type in services_config.keys():
@@ -155,7 +161,16 @@ def aggmon_control(argv):
                         # start service!
                         #
                         ## select_host_to_run_on
-                        start_service(svc_type, "group:%s" % gpath)
+                        control.start_component(svc_type, "group:%s" % gpath)
+                        comp.set_data("/components/%s/group/%s" % (svc_type, own_groups_keys[gpath]),
+                                      "started %s" % time.ctime())
+                #
+                # TODO: handle deconfigured groups
+                #
+
+                #
+                # Kill all services
+                #
             #
             # per_job services
             #
@@ -169,12 +184,25 @@ def aggmon_control(argv):
                         #
                         # start service!
                         #
-                        start_service(svc_type, "job:/%s" % jobid)
-            #
-            # TODO: handle finished jobs
-            # TODO: handle deconfigured groups
-            #
-
+                        control.start_component(svc_type, "job:/%s" % jobid)
+                        comp.set_data("/components/%s/job/%s" % (svc_type, jobid),
+                                      "started %s" % time.ctime())
+                #
+                # handle finished jobs
+                #
+                own_started_jobs = comp.get_data("/components/%s/job")
+                if own_started_jobs is not None:
+                    for jobid in set(own_started_jobs.keys()) - set(own_jobids):
+                        svc_state = comp.get_state(svc_type, "job:/%s" % jobid)
+                        if svc_state is not None:
+                            #
+                            # kill service!
+                            #
+                            control.kill_component(svc_type, "job:/%s" % jobid)
+                        else:
+                            comp.del_data("/components/%s/job/%s" % (svc_type, jobid))
+                
+                            
 
 def join_threads(subq):
     try:

@@ -316,8 +316,6 @@ class ComponentControl(object):
         a subsequent kill attempt, the kill will attempt to kill the process of the
         component (hard kill).
         """
-        msg = {"component": service, "hierarchy_url": hierarchy_url}
-        msg.update(kwds)
         res = False
 
         state = self.comp_state.get_state(service, hierarchy_url)
@@ -333,7 +331,7 @@ class ComponentControl(object):
             return False
 
         # is the process running? check with "ps"
-        status = self.process_status(state)
+        status = self._process_status(state)
         if status == "not found":
             res = self.comp_state.del_state(service, hierarchy_url)
             log.debug("kill_component deleting state %r" % res)
@@ -377,28 +375,10 @@ class ComponentControl(object):
                 log.debug("kill_component (kill) res=%r" % res)
             except Exception as e:
                 log.error("subprocess error when running '%s' : '%r'" % (exec_cmd, e))
-        #if res:
-        #    res = self.del_state(msg)
-        #    log.debug("kill_component deleting state %r" % res)
         return res
 
 
-    #def kill_components(self, component_types):
-    #    for group_path in self.config.get("/groups").keys():
-    #        for comp_type in component_types:
-    #            c = self.get_state({"component": comp_type})
-    #            if c is not None:
-    #                if "component" in c:
-    #                    log.info("killing component %r" % c)
-    #                    self.kill_component(comp_type, group_path, METHOD="kill")
-    #                else:
-    #                    log.debug("components: %r" % c)
-    #                    for jobid, jagg in c.items():
-    #                        log.info("killing job_agg component %s" % jobid)
-    #                        self.kill_component(comp_type, group_path, jobid=jobid, METHOD="kill")
-
-
-    def process_status(self, component_state):
+    def _process_status(self, component_state):
         """
         Find out process status returned by the ps command, return "running", "not found" or "unkown".
         """
