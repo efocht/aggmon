@@ -129,6 +129,43 @@ class ComponentState(object):
         ComponentState.this = self
         self.rpc = RPCThread(etcd_client, self.etcd_path + "/rpc")
 
+    def del_data(self, path):
+        """
+        Delete component data.
+        """
+        if not path.startswith("/"):
+            path = "/" + path
+        path = self.etcd_path + "/data" + path
+        try:
+            data = self.etcd_client.read(path)
+            self.etcd_client.delete(path, recursive=True, dir=data.dir)
+        except EtcdKeyNotFound:
+            return False
+        except Exception as e:
+            log.warning("Etcd error while retrieving data (%s): %r" % (path, e))
+            return False
+        return True
+
+    def del_state(self, component_type, hierarchy_url=None):
+        """
+        Delete the state of a component immediately, don't wait for TTL expiration.
+        If hierarchy_url is not passed, delet all component states of a certain
+        component type.
+        """
+        if hierarchy_url is None:
+            path = "/".join([ETCD_COMPONENT_PATH, component_type])
+        else:
+            hierarchy, component_id, hierarchy_path = hierarchy_from_url(hierarchy_url)
+            path = "/".join([ETCD_COMPONENT_PATH, component_type, hierarchy, component_id, "state"])
+        try:
+            self.etcd_client.delete(path, recursive=True, dir=True)
+        except EtcdKeyNotFound:
+            return False
+        except Exception as e:
+            log.warning("Etcd error while deleting state (%s): %r" % (path, e))
+            return False
+        return True
+
     def get_data(self, path):
         """
         Retrieve component data.
@@ -143,12 +180,15 @@ class ComponentState(object):
             log.warning("Etcd error while retrieving data (%s): %r" % (path, e))
 
     @staticmethod
-    def get_state(self, component_type, hierarchy_url):
+    def get_state(self, component_type, hierarchy_url=None):
         """
         Retrieve component instance state.
         """
-        hierarchy, component_id, hierarchy_path = hierarchy_from_url(hierarchy_url)
-        path = "/".join([ETCD_COMPONENT_PATH, component_type, hierarchy, component_id, "state"])
+        if hierarchy_url is None:
+            path = "/".join([ETCD_COMPONENT_PATH, component_type])
+        else:
+            hierarchy, component_id, hierarchy_path = hierarchy_from_url(hierarchy_url)
+            path = "/".join([ETCD_COMPONENT_PATH, component_type, hierarchy, component_id, "state"])
         try:
             return self.etcd_client.deserialize(path)
         except EtcdKeyNotFound:
@@ -162,7 +202,7 @@ class ComponentState(object):
             path += "/" + component_type
         for r in self.etcd_client.read(path, recursive=True).children:
             if r.key.endswith("/state"):
-                yield self.etcd_client.get(r.key)
+                yield self.etcd_client.deserialize(r.key)
 
     def reset_timer(self, *__args, **__kwds):
         if self.timer is not None:
@@ -170,11 +210,13 @@ class ComponentState(object):
         # send one state ping message
         self.send_state_update()
         # and create new repeat timer
-        self.timer = RepeatTimer(self.ping_interval, self.send_state_update)
+        self.timer = RepeatTimer(self.ping_interval, self.set_state)
 
-    def send_state_update(self):
+    def set_state(self, state=None):
+        if state is None:
+            state = self.state
         try:
-            return self.etcd_client.update(self.etcd_path + "/state", self.state,
+            return self.etcd_client.update(self.etcd_path + "/state", state,
                                            ttl=int(self.ping_interval*1.3))
         except Exception as e:
             log.warning("Etcd error at state update: %r" % e)
@@ -194,7 +236,7 @@ class ComponentState(object):
         self.rpc.start()
         self.reset_timer()
 
-    def update_state(self, state):
+    def update_state_cache(self, state):
         """
         Update the internal state.
         """
@@ -278,7 +320,7 @@ class ComponentControl(object):
         msg.update(kwds)
         res = False
 
-        state = self.get_state(msg)
+        state = self.comp_state.get_state(service, hierarchy_url)
         if state is None:
             log.warning("component '%s' state not found. Don't know how to kill it." % service)
             return False
@@ -293,7 +335,7 @@ class ComponentControl(object):
         # is the process running? check with "ps"
         status = self.process_status(state)
         if status == "not found":
-            res = self.del_state(msg)
+            res = self.comp_state.del_state(service, hierarchy_url)
             log.debug("kill_component deleting state %r" % res)
             return True
         elif status == "unknown":
@@ -383,77 +425,9 @@ class ComponentControl(object):
             # trying the next node, if any
         return status
 
-
-    def get_state(self, msg):
-        """
-        Get the state of a component or all components of the same type.
-
-        'msg' is a dict that must contain at least a "component" key. If it also contains a
-        "hierarchy_url" key, then a particular instance of a component is looked up. Otherwise
-        all instances of the given component type are returned.
-        """
-        log.debug("get_state: msg %r" % msg)
-        path = ETCD_COMPONENT_PATH
-        if "component" in msg:
-            component = msg["component"]
-            path += "/" + component
-            
-            if "hierarchy_url" in msg:
-                hierarchy_url = msg["hierarchy_url"]
-                hierarchy, hierarchy_key, hierarchy_path = hierarchy_from_url(hierarchy_url)
-                path += "/" + hierarchy + "/" + hierarchy_key
-                return self.etcd_client.get(path + "/state")
-            elif "hierarchy" in msg:
-                path += "/" + hierarchy
-
-        result = []
-        for c in self.etcd_client.read(path, recursive=True).children:
-            if not c.dir and c.key.endswith("/state"):
-                result.append(c.value)
-        return result
-
-
-    def del_state(self, msg):
-        """
-        """
-        log.debug("del_state: msg %r" % msg)
-        if "component" not in msg:
-            log.error("del_state: 'component' not in msg %r" % msg)
-            return False
-        component = msg["component"]
-        if component not in self.repo:
-            log.error("del_state: component '%s' not in msg %r" % (component, msg))
-            return False
-        key = component_key(self.config.get("/services/%s/component_key" % component), msg)
-        if len(key) > 0:
-            fullkey = None
-            if key in self.repo[component]:
-                fullkey = key
-            else:
-                # try to match for it
-                for k in self.repo[component].keys():
-                    if k.startswith(key):
-                        fullkey = k
-                        break
-            if fullkey is not None:
-                log.info("del_state: deleting state for '%s' -> '%s'" % (component, fullkey))
-                del self.repo[component][fullkey]
-                # callback handling
-                cbkey = component + ":" + fullkey
-                if cbkey in self.component_kill_cb:
-                    cb = self.component_kill_cb[cbkey]["cb"]
-                    args = self.component_kill_cb[cbkey]["args"]
-                    try:
-                        cb(*args)
-                    except Exception as e:
-                        log.error("kill_cb error: %r" % e)
-                    del self.component_kill_cb[cbkey]
-    
-                if self.repo[component] == {}:
-                    del self.repo[component]
-                return True
-        return False
-
+    #
+    # This method is obsolete if TTL expiration works properly.
+    #
     def check_outdated(self):
         outdated = {}
         now = time.time()
@@ -478,6 +452,9 @@ class ComponentControl(object):
                 res = True
         return res
 
+    #
+    # TODO: ?? is this still needed?
+    #
     def component_wait_timeout(self, component, num, timeout=120):
         """
         Wait until 'num' components of the given type have appeared
