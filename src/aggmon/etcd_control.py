@@ -65,6 +65,59 @@ In order to clean up the distributed system and kill all components, agg_control
 with the --kill command line option.
 """
 
+def group_of_job(jobid, job_nodes, hosts_group):
+    """
+    Return the representative group hpath of a particular job.
+    Compute the group deterministically, such that each controller gets the same result
+    when computing it.
+
+    Approach implemented here: determine in which group are most of the jobs nodes.
+    """
+    group_hpath = None
+    group_histo = {}
+    max_histo = -1
+    for node in job_nodes:
+        if node in hosts_group:
+            gpath = hosts_group[node]
+        else:
+            log.warning("Host '%s' is in job %s but not in group hierarchy!" % (node, jobid))
+            continue
+        if gpath not in group_histo:
+            group_histo[gpath] = 0
+        group_histo[gpath] += 1
+        if group_histo[gpath] > max_histo:
+            max_histo = group_histo[gpath]
+            group_hpath = gpath
+    return group_hpath
+
+
+def filter_group_jobs(jobs_config, hosts_group, own_groups_hpath):
+    """
+    Create list of jobids that should be handled by this controller.
+    """
+    own_jobids = []
+    for jobid, job_config in jobs_config.items():
+        if "nodes" not in job_config:
+            log.warning("'nodes' not in job hierarchy info. What's wrong here?")
+            continue
+        if group_of_job(job_config["nodes"], hosts_group) in own_groups_hpath:
+            own_jobids.append(jobid)
+    return own_jobids
+
+
+def calc_hosts_group(groups_config):
+    """
+    Return a dict with each host being a key with its group hpath as value.
+    """
+    hosts_group = {}
+    for gk, gv in groups_config.items():
+        if "nodes" in gv:
+            gpath = gv["hpath"]
+            for host in gv["nodes"]:
+                hosts_group[host] = gpath
+    return hosts_group
+
+
 def aggmon_control(argv):
     global comp, etcd_client
 
@@ -99,15 +152,17 @@ def aggmon_control(argv):
             own_groups_keys[gv["hpath"]] = group_key
 
     state = {}
+    running = True
+    kill_services = False
 
     def quit(msg):
         comp.rpc.stop()
         running = False
-        #subq.stopping = True
-        # raw exit for now
-        os._exit(0)
 
-    #atexit.register(join_threads, subq)
+    def kill_and_quit(msg):
+        comp.rpc.stop()
+        running = False
+        kill_services = True
 
     etcd_client = EtcdClient()
     state = get_kwds(own_groups=groups)
@@ -119,6 +174,7 @@ def aggmon_control(argv):
     #comp.rpc.register_rpc("add_group", add_group)
     #comp.rpc.register_rpc("remove_group", remove_group)
     #comp.rpc.register_rpc("show_groups", show_groups)
+    comp.rpc.register_rpc("killquit", kill_and_quit, early_reply=True)
     comp.rpc.register_rpc("quit", quit, early_reply=True)
 
     control = ComponentControl(config, etcd_client, comp)
@@ -129,8 +185,6 @@ def aggmon_control(argv):
     # ...
     # - check per_job subscribers and remove accordingly
 
-    running = True
-    kill_services = False
     while (running):
         #
         # get hierarchies info
@@ -139,11 +193,9 @@ def aggmon_control(argv):
         groups_config = config.get("/hierarchy/group")
         services_config = config.get("/services")
 
-        # TODO
-        own_jobids = filter_group_jobs(jobs_config, own_groups_hpath)
+        hosts_group = calc_hosts_group(groups_config)
+        own_jobids = filter_group_jobs(jobs_config, hosts_group, own_groups_hpath)
 
-        # previous state of own jobs list
-        
         # loop over services
         for svc_type in services_config.keys():
             svc_cfg = services_config[service_type]
@@ -160,7 +212,7 @@ def aggmon_control(argv):
                         #
                         # start service!
                         #
-                        ## select_host_to_run_on
+                        ## TODO: select_host_to_run_on
                         control.start_component(svc_type, "group:%s" % gpath)
                         comp.set_data("/components/%s/group/%s" % (svc_type, own_groups_keys[gpath]),
                                       "started %s" % time.ctime())
@@ -168,9 +220,6 @@ def aggmon_control(argv):
                 # TODO: handle deconfigured groups
                 #
 
-                #
-                # Kill all services
-                #
             #
             # per_job services
             #
@@ -201,16 +250,18 @@ def aggmon_control(argv):
                             control.kill_component(svc_type, "job:/%s" % jobid)
                         else:
                             comp.del_data("/components/%s/job/%s" % (svc_type, jobid))
-                
-                            
 
-def join_threads(subq):
-    try:
-        subq.join(0.1)
-    except Exception as e:
-        log.error("main thread exception: %r" % e)
-    log.debug("leaving...")
-
+    if kill_services:
+        own_services = comp.get_data("/components")
+        for svc_type in own_services.keys():
+            for hierarchy in own_services[svc_type].keys():
+                for hierarchy_key in own_services[svc_type][hierarchy].keys():
+                    svc_state = comp.get_state(svc_type, "job:/%s" % jobid)
+                    if svc_state is not None:
+                        control.kill_component(svc_type, "job:/%s" % jobid)
+                        comp.del_data("/components/%s/job/%s" % (svc_type, jobid))
+    os._exit(0)
+                    
 
 if __name__ == "__main__":
     aggmon_control(sys.argv)
