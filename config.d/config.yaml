@@ -1,19 +1,7 @@
 config:
     hierarchy:
-        monitor:
-            group:
-                0: universe
+        group:
         job:
-            jobid:
-                0: 123
-    groups:
-        universe:
-            job_agg_nodes:
-                0: localhost
-            data_store_nodes:
-                0: localhost
-            collector_nodes:
-                0: localhost
     services:
         collector:
             cmdport_range: 5100-5199

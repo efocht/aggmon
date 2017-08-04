@@ -2,8 +2,6 @@
 #    https://github.com/jplana/python-etcd
 from etcd import *
 from urllib3.exceptions import TimeoutError
-from etcd import EtcdException
-from etcd import Client, EtcdKeyNotFound
 import json
 import logging
 import os
@@ -59,11 +57,19 @@ class EtcdClient(Client):
         Serialize a nested structure of dicts into an etcd directory tree.
         Objects of type dict within the config will be serialized as directories.
         All values are JSON encoded.
+        Expect the top level path to NOT exist!
         """
         if isinstance(obj, dict):
-            self.write(base_path, None, dir=True)
+            try:
+                self.write(base_path, None, dir=True)
+            except EtcdNotFile as e:
+                # this happens when the directory already exists.
+                # one should rather use update() than serialize()
+                # for debugging the code, raise the exception
+                raise e
+
             for key, value in obj.items():
-                path = base_path + "/" + key
+                path = base_path + "/" + str(key)
                 self.serialize(path, value, **kwargs)
         else:
             self.set(base_path, obj, **kwargs)
@@ -99,14 +105,14 @@ class EtcdClient(Client):
                 else:
                     # - are any keys in old to be deleted?
                     for key in set(old.keys()) - set(new.keys()):
-                        self.delete(path + "/" + key, recursive=True, dir=True)
+                        self.delete(path + "/" + str(key), recursive=True, dir=True)
                         del old[key]
                     # - are there new keys?
                     for key in set(new.keys()) - set(old.keys()):
-                        self.serialize(path + "/" + key, new[key], **kwargs)
+                        self.serialize(path + "/" + str(key), new[key], **kwargs)
                         del new[key]
             for key, value in new.items():
-                self.update(path + "/" + key, value, **kwargs)
+                self.update(path + "/" + str(key), value, **kwargs)
 
     def get(self, key, **kwargs):
         res = self.read(key, **kwargs)
@@ -153,18 +159,16 @@ class EtcdClient(Client):
         """
         Returns a list of the keys inside a path.
         """
-        if not path.endswith("/"):
-            path = path + "/"
         try:
-            res = self.read(path, timeout=timeout)
+            res = self.read(path, recursive=True, timeout=timeout)
         except TimeoutError:
             raise EtcTimeout
         except Exception as e:
             raise e
         if strip_parent:
             _lenpath = len(path)
-            out = [c.key[_lenpath:] for c in res.children]
+            out = [c.key[_lenpath:] for c in res.children if c.key != path]
         else:
-            out = [c.key for c in res.children]
+            out = [c.key for c in res.children if c.key != path]
         return out
 

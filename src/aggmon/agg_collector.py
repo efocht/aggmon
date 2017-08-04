@@ -349,7 +349,7 @@ def aggmon_collector(argv):
                     help="print statistics info")
     ap.add_argument('-v', '--verbose', type=int, default=0, action="store",
                     help="verbosity")
-    pargs = ap.parse_args(argv)
+    pargs = ap.parse_args(argv[1:])
 
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"

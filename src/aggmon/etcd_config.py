@@ -7,7 +7,9 @@ import os.path
 import sys
 import time
 import traceback
+from etcd import *
 from etcd_client import *
+import pdb
 
 
 log = logging.getLogger( __name__ )
@@ -135,12 +137,17 @@ class Config(object):
             result = yaml.safe_load(open(f))
             cf = result.get("config", None)
             if cf is not None:
-                groups = cf.get("groups", None)
-                if isinstance(groups, dict):
-                    for group in groups:
-                        config["groups"][group] = {}
-                        for htype, hosts in groups[group].items():
-                            config["groups"][group][htype] = [hosts[i] for i in sorted(hosts.keys())]
+                hierarchy = cf.get("hierarchy", None)
+                if isinstance(hierarchy, dict):
+                    obj = hierarchy.get("group", None)
+                    if isinstance(obj, dict):
+                        config["hierarchy"]["group"].update(obj)
+                    obj = hierarchy.get("job", None)
+                    if isinstance(obj, dict):
+                        config["hierarchy"]["job"].update(obj)
+                    obj = hierarchy.get("monnodes", None)
+                    if isinstance(obj, dict):
+                        config["hierarchy"]["monnodes"].update(obj)
                 services = cf.get("services", None)
                 if isinstance(services, dict):
                     obj = services.get("collector", None)
@@ -238,11 +245,12 @@ class Config(object):
         """
         try:
             self.etcd_client.write(ETCD_CONFIG_ROOT, None, dir=True, prevExist=False)
-        except etcd.EtcdKeyAlreadyExists:
+        except EtcdAlreadyExist:
+            log.warning("etcd %s already exists." % ETCD_CONFIG_ROOT)
             return False
         config = self.load_files()
         try:
-            self.etcd_client.serialize(ETCD_CONFIG_ROOT, config)
+            self.etcd_client.update(ETCD_CONFIG_ROOT, config)
         except Exception as e:
             log.error("Failed to initialize config. %r" % e)
             self.etcd_client.delete(ETCD_CONFIG_ROOT, recursive=True, dir=True)

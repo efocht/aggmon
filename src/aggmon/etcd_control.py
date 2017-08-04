@@ -4,6 +4,7 @@ import atexit
 import argparse
 import logging
 import os
+import platform
 try:
     import pdb
 except:
@@ -131,7 +132,7 @@ def aggmon_control(argv):
                     help="logging: info, debug, ...")
     ap.add_argument('-v', '--verbose', type=int, default=0, action="store",
                     help="verbosity")
-    pargs = ap.parse_args(argv)
+    pargs = ap.parse_args(argv[1:])
 
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
@@ -141,15 +142,22 @@ def aggmon_control(argv):
         log.error("No group path provided for this component. Use the -g option!")
         sys.exit(1)
     
-    config = Config(config_dir=pargs.config)
+    etcd_client = EtcdClient()
+    config = Config(etcd_client, config_dir=pargs.config)
+    config.init_etcd()
 
     # groups for which this controller is responsible
     own_groups_hpath = pargs.group
     own_groups_keys = {}
     groups_config = config.get("/hierarchy/group")
+    _groups_found = 0
     for group_key, gv in groups_config.items():
         if gv["hpath"] in own_groups_hpath:
             own_groups_keys[gv["hpath"]] = group_key
+            _groups_found += 1
+    if _groups_found < len(own_groups_hpath):
+        log.error("Check your configuration! The groups this controller is responsible for could not be found.")
+        os._exit(-1)
 
     state = {}
     running = True
@@ -164,10 +172,10 @@ def aggmon_control(argv):
         running = False
         kill_services = True
 
-    etcd_client = EtcdClient()
-    state = get_kwds(own_groups=groups)
+    state = get_kwds(own_groups=pargs.group)
 
-    hostname = etcd_client.members["name"]   # could also use "id"
+    pdb.set_trace()
+    hostname = platform.node()
     
     comp = ComponentState(etcd_client, "control", "monnodes:/%s" % hostname, state=state)
     comp.start()
@@ -198,7 +206,7 @@ def aggmon_control(argv):
 
         # loop over services
         for svc_type in services_config.keys():
-            svc_cfg = services_config[service_type]
+            svc_cfg = services_config[svc_type]
             #
             # per_group services
             #

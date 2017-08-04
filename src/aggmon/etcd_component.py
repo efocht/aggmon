@@ -208,7 +208,7 @@ class ComponentState(object):
         if self.timer is not None:
             self.timer.stop()
         # send one state ping message
-        self.send_state_update()
+        self.set_state()
         # and create new repeat timer
         self.timer = RepeatTimer(self.ping_interval, self.set_state)
 
