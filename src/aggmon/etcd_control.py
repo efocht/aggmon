@@ -173,8 +173,6 @@ def aggmon_control(argv):
         kill_services = True
 
     state = get_kwds(own_groups=pargs.group)
-
-    pdb.set_trace()
     hostname = platform.node()
     
     comp = ComponentState(etcd_client, "control", "monnodes:/%s" % hostname, state=state)
@@ -193,7 +191,7 @@ def aggmon_control(argv):
     # ...
     # - check per_job subscribers and remove accordingly
 
-    while (running):
+    while running:
         #
         # get hierarchies info
         #
@@ -247,7 +245,7 @@ def aggmon_control(argv):
                 #
                 # handle finished jobs
                 #
-                own_started_jobs = comp.get_data("/components/%s/job")
+                own_started_jobs = comp.get_data("/components/%s/job" % svc_type)
                 if own_started_jobs is not None:
                     for jobid in set(own_started_jobs.keys()) - set(own_jobids):
                         svc_state = comp.get_state(svc_type, "job:/%s" % jobid)
@@ -258,6 +256,10 @@ def aggmon_control(argv):
                             control.kill_component(svc_type, "job:/%s" % jobid)
                         else:
                             comp.del_data("/components/%s/job/%s" % (svc_type, jobid))
+        delay = 20 # seconds
+        while running and delay > 0:
+            time.sleep(1000)
+            delay -= 1
 
     if kill_services:
         own_services = comp.get_data("/components")

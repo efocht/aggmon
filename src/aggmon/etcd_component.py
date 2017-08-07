@@ -179,8 +179,8 @@ class ComponentState(object):
         except Exception as e:
             log.warning("Etcd error while retrieving data (%s): %r" % (path, e))
 
-    @staticmethod
-    def get_state(self, component_type, hierarchy_url=None):
+    #@staticmethod
+    def get_state(self, component_type, hierarchy_url):
         """
         Retrieve component instance state.
         """
@@ -262,7 +262,7 @@ class ComponentControl(object):
         self.component_kill_cb = {}
 
 
-    def start_component(self, component_type, hierarchy_url,
+    def start_component(self, service, hierarchy_url,
                         __CALLBACK=None, __CALLBACK_ARGS=[], **kwds):
         """
         Starts a component. Called from control to start collectors, aggregators, data_stores.
@@ -278,8 +278,8 @@ class ComponentControl(object):
         if hierarchy_key not in self.config.get("/hierarchy/%s" % hierarchy):
             log.error("start_component: hierarchy_key '%s' not found in configuration!" % hierarchy_key)
             return False
-        if component_type not in self.config.get("/services"):
-            log.error("start_component: service '%s' not found in configuration!" % component_type)
+        if service not in self.config.get("/services"):
+            log.error("start_component: service '%s' not found in configuration!" % service)
             return False
         locals().update(kwds)
         svc_info = self.config.get("/services/%s" % service)
@@ -288,18 +288,23 @@ class ComponentControl(object):
         cmd_opts = svc_info["cmd_opts"]
         if "listen_port_range" in svc_info:
             listen = "tcp://0.0.0.0:%s" % svc_info["listen_port_range"]
-        if "logfile" in svc_info:
-            logfile = svc_info["logfile"] % locals()
         # register callback
         if __CALLBACK is not None:
             key = service + ":" + hierarchy_url
             self.component_start_cb[key] = {"cb": __CALLBACK, "args": __CALLBACK_ARGS}
         try:
+            if "logfile" in svc_info:
+                logfile = svc_info["logfile"] % locals()
             cmd = which(cmd)
             cmd_opts = cmd_opts % locals()
             cmd = cmd + " " + cmd_opts
             exec_cmd = self.config.get("/global/local_cmd") % locals()
-            log.info("starting subprocess: %s" % exec_cmd)
+        except KeyError as e:
+            log.error("Configuration error: service %s :%r" % (service, e))
+            return
+
+        log.info("starting subprocess: %s" % exec_cmd)
+        try:
             out = subprocess.check_output(exec_cmd, stderr=subprocess.STDOUT, shell=True)
             log.info("output: %s" % out)
         except Exception as e:

@@ -43,32 +43,30 @@ DEFAULT_CONFIG = {
         "collector": {
             "cwd": os.getcwd(),
             "cmd": "agg_collector",
-            "cmd_opts": "--cmd-port %(cmdport)s --listen %(listen)s " +
-            "--group %(group_path)s --state-file %(statefile)s --dispatcher %(dispatcher)s",
-            "cmdport_range": "5100-5199",
+            "cmd_opts": "--listen %(listen)s " +
+            "--hierarchy-url %(hierarchy_url)s --state-file %(statefile)s --dispatcher %(dispatcher)s",
             "component_key": "group:host",
             "listen_port_range": "5262",
-            "logfile": "/tmp/%(service)s_%(group)s.log",
+            "logfile": "/tmp/%(service)s_%(hierarchy)s_%(hierarchy_key)s.log",
             "per_group": True
         },
         "data_store": {
             "cwd": os.getcwd(),
             "cmd": "agg_datastore",
-            "cmd_opts": "--cmd-port %(cmdport)s --listen %(listen)s " +
+            "cmd_opts": "--listen %(listen)s " +
             "--dbname \"%(dbname)s\" --host \"%(dbhost)s\" " +
-            "--group %(group_path)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
+            "--hierarchy-url %(hierarchy_url)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
             "cmdport_range": "5100-5199",
             "component_key":  "group:host",
             "listen_port_range": "5200-5299",
-            "logfile": "/tmp/%(service)s_%(group)s.log",
+            "logfile": "/tmp/%(service)s_%(hierarchy)s_%(hierarchy_key)s.log",
             "per_group": True
         },
         "job_agg": {
             "cwd": os.getcwd(),
             "cmd": "agg_jobagg",
-            "cmd_opts": "--cmd-port %(cmdport)s --listen %(listen)s --log debug " +
+            "cmd_opts": "--listen %(listen)s --log debug " +
             "--jobid %(jobid)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
-            "cmdport_range": "5000-5999",
             "component_key":  "jobid",
             "listen_port_range": "5300-5999",
             "logfile": "/tmp/%(service)s_%(jobid)s.log",

@@ -1,16 +1,22 @@
 config:
     hierarchy:
         group:
+            universe:
+                nodes:
+                    testnode1
+                    testnode2
+                hpath: /universe
         job:
+        monnodes:
     services:
         collector:
             cmdport_range: 5100-5199
             listen_port_range: 5262
-            logfile: /tmp/%(service)s_%(group)s.log
+            logfile: /tmp/%(service)s_%(hierarchy)s_%(hierarchy_key)s.log
         data_store:
             cmdport_range: 5100-5199
             listen_port_range: 5200-5299
-            logfile: /tmp/%(service)s_%(group)s.log
+            logfile: /tmp/%(service)s_%(hierarchy)s_%(hierarchy_key)s.log
         job_agg:
             cmdport_range: 5000-5999
             listen_port_range: 5300-5999
@@ -22,7 +28,5 @@ config:
         password: ""
     global:
         local_cmd:   cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &
-        remote_cmd:  'ssh %(host)s "cd %(cwd)s; %(cmd)s >%(logfile)s 2>&1 &"'
-        remote_kill: ssh %(host)s kill %(pid)d
     resource_manager:
         master: localhost
