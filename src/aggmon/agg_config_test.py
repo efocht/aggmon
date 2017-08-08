@@ -1,4 +1,4 @@
-from etcd_config import *
+from agg_config import *
 import pprint
 
 

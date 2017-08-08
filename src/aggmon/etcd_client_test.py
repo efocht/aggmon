@@ -1,5 +1,5 @@
 from etcd_client import EtcdQueueEmpty, EtcdTimeout, EtcdClient
-from etcd_config import DEFAULT_CONFIG
+from agg_config import DEFAULT_CONFIG
 import pprint
 import sys
 

@@ -17,8 +17,8 @@ import zmq
 from Queue import Queue, Empty
 from agg_helpers import *
 from agg_mcache import MCache
-from etcd_component import get_kwds, ComponentState
-from etcd_rpc import *
+from agg_component import get_kwds, ComponentState
+from agg_rpc import *
 import basic_aggregators as aggs
 from config import Config, DEFAULT_CONFIG_DIR
 from repeat_event import RepeatEvent

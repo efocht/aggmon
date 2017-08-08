@@ -1,3 +1,4 @@
+from etcd_client import *
 import logging
 import os
 import pdb
@@ -9,10 +10,9 @@ try:
     import ujson as json
 except:
     import json
-import zmq
 
 
-RPC_TIMEOUT = int(os.environ.get("AGG_RPC_TIMEOUT", 5000)) # 5 seconds by default
+RPC_TIMEOUT = int(os.environ.get("AGG_RPC_TIMEOUT", 10)) # 10 seconds by default
 log = logging.getLogger( __name__ )
 
 
@@ -20,81 +20,50 @@ class RPCNoReplyError(Exception):
     pass
 
 
-def send_rpc(zmq_context, rpc_server, cmd, _RPC_TIMEOUT_=RPC_TIMEOUT, **kwds):
+def _rpc_res_path(rpc_cmd_path):
+    return "/".join(rpc_cmd_path.split("/")[:-1]) + "/rpc_out"
+
+def _basename(a):
+    return a.split("/")[-1]
+
+
+def send_rpc(etcd_client, rpc_cmd_path, cmd, _RPC_TIMEOUT_=RPC_TIMEOUT, **kwds):
     """
     Send an rpc request to a command server.
+
+    rpc_cmd_path is the path to the directory receiving the rpc commands for a particular service.
     """
-    socket = zmq_context.socket(zmq.REQ)
-    poller = zmq.Poller()
-    #log.debug("connecting to %s" % rpc_server)
-    socket.connect(rpc_server)
-    poller.register(socket)
     kwds["CMD"] = cmd
-    msg = json.dumps(kwds)
-    log.debug("sending to %s RPC msg: %r" % (rpc_server, msg))
-    socket.send(msg, flags=zmq.NOBLOCK)
+    log.debug("sending to %s RPC msg: %r" % (rpc_cmd_path, kwds))
+    req = etcd_client.qput(rpc_cmd_path, kwds)
+
+    req_index = req.createdIndex
+    req_key = req.key.split("/")[-1]
+    
+
     result = None
+    rpc_res_path = _rpc_res_path(rpc_cmd_path)
+
+    # wait for the result key to appear
     try:
-        events = poller.poll( timeout=_RPC_TIMEOUT_ )
+        result = etcd_client.watch(rpc_res_path + "/" + req_key, index=req_index, timeout=_RPC_TIMEOUT_).value
+        result = json.loads(result)
+        log.debug("Received result: %r" % result)
     except KeyboardInterrupt:
         return None
     except Exception as e:
         log.error("send_rpc failed with '%r'" % e)
-    if len( events ) != 0:
-        for sock, _event in events:
-            reply = sock.recv_json()
-            log.debug("received result msg: %r" % reply)
-            if "RESULT" in reply:
-                result = reply["RESULT"]
+
+    # decode result and return it
+    if "RESULT" in result:
+        result = result["RESULT"]
+        etcd_client.delete(rpc_res_path + "/" + req_key)
     else:
-        socket.disconnect(rpc_server)
-        socket.close()
         raise RPCNoReplyError("RPC server at %s did not reply." % rpc_server)
-    socket.disconnect(rpc_server)
-    socket.close()
     return result
 
-def zmq_socket_bind_range(sock, listen):
-    """
-    This accepts port ranges as argument, for example "tcp://*:6100-6200" or
-    even concatenated ranges like "tcp://0.0.0.0:6100-6200,7100-7200".
 
-    Returns the port to which the socket was bound or None in case of error.
-    """
-    proto, addr, ports = listen.split(":")
-    port = None
-    if ports.isdigit():
-        # this is just a port number, do simple bind
-        try:
-            sock.bind(listen)
-            port = int(ports)
-        except Exception as e:
-            log.error("zmq_socket_bind_range failed: %r" % e)
-    elif "," in ports or "-" in ports:
-        for prange in ports.split(","):
-            if "-" in prange:
-                # this should better be a range of ports
-                p_min, p_max = prange.split("-")
-                p_min = int(p_min)
-                p_max = int(p_max)
-                try:
-                    port = sock.bind_to_random_port(proto + ":" + addr, min_port=p_min, max_port=p_max, max_tries=100)
-                except Exception as e:
-                    log.error("zmq_socket_bind_range failed: %r" % e)
-                else:
-                    break
-            elif prange.isdigit():
-                try:
-                    sock.bind(proto + ":" + addr + ":" + prange)
-                    port = int(prange)
-                except Exception as e:
-                    pass
-                else:
-                    break
-    return port
-
-
-def zmq_own_addr_for_tgt(target):
+def own_addr_for_tgt(target):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect((target, 0))
     addr = s.getsockname()[0]
@@ -102,58 +71,77 @@ def zmq_own_addr_for_tgt(target):
     return addr
 
 
-def zmq_own_addr_for_uri(uri):
-    proto, addr, port = zmq_uri_split(uri)
-    return zmq_own_addr_for_tgt(addr)
+def own_addr_for_uri(uri):
+    proto, addr, port = uri_split(uri)
+    return own_addr_for_tgt(addr)
 
 
-def zmq_uri_split(uri):
+def uri_split(uri):
     proto, addr, port = uri.split(":")
     addr = addr.lstrip("/")
     return proto, addr, port
 
 
-
-
-
 class RPCThread(threading.Thread):
-    def __init__(self, zmq_context, listen="tcp://0.0.0.0:5556"):
-        self.responder = zmq_context.socket(zmq.REP)
-        self.port = zmq_socket_bind_range(self.responder, listen)
-        assert( self.port is not None)
-        self.listen = ":".join(listen.split(":")[:2] + [str(self.port)])
+    def __init__(self, etcd_client, rpc_cmd_path):
+        self.etcd_client = etcd_client
+        self.rpc_cmd_path = rpc_cmd_path
+        self.rpc_res_path = _rpc_res_path(rpc_cmd_path)
+        #
+        # tune logging levels of some of the called components
+        #
+        log_levels = {
+            "etcd.client": logging.CRITICAL,
+            "urllib3.connectionpool": logging.WARNING,
+        }
+        for l_name, l_lev in log_levels.items():
+            l = logging.getLogger(l_name)
+            l.setLevel(l_lev)
+        #
+        # create paths if not existing
+        #
+        try:
+            self.etcd_client.write(self.rpc_cmd_path, None, dir=True, prevExist=False)
+        except EtcdAlreadyExist:
+            log.warning("etcd directory path %s exists. Reusing it." % self.rpc_cmd_path)
+        try:
+            self.etcd_client.write(self.rpc_res_path, None, dir=True, prevExist=False)
+        except EtcdAlreadyExist:
+            log.warning("etcd directory path %s exists. Reusing it." % self.rpc_res_path)
+        #
         self.stopping = False
         threading.Thread.__init__(self)
         self.daemon = True
-        self.rpcs = {}
+        self._rpcs = {}
+
 
     # TODO: integrate rpcs
     def register_rpc(self, cmd, function, args=[], kwargs={}, post=None, post_args=[], early_reply=None):
         """
         A rpc function will be called with the arguments: cmd, msg, *args, **kwargs
         """
-        self.rpcs[cmd] = (function, args, kwargs, post, post_args, early_reply)
+        self._rpcs[cmd] = (function, args, kwargs, post, post_args, early_reply)
 
     def run(self):
-        log.info( "[Started RPCThread listening on %s]" % self.listen )
+        log.info( "[Started RPCThread at %s]" % self.rpc_cmd_path )
         self.rpc_server()
 
     def rpc_server(self):
         while not self.stopping:
             try:
-                s = self.responder.recv(flags=zmq.NOBLOCK)
-                msg = json.loads(s)
+                key, msg = self.etcd_client.qget(self.rpc_cmd_path, wait=True, timeout=1)
+                key = _basename(key)
                 log.debug( "rpc_server received: %r" % msg )
                 if "CMD" in msg:
                     res = "UNKNOWN"
                     cmd = msg["CMD"]
                     del msg["CMD"]
-                    if cmd in self.rpcs:
-                        func, args, kwargs, post, post_args, early_reply = self.rpcs[cmd]
+                    if cmd in self._rpcs:
+                        func, args, kwargs, post, post_args, early_reply = self._rpcs[cmd]
                         if early_reply is not None:
-                            rep_msg = json.dumps({"RESULT": early_reply})
+                            rep_msg = {"RESULT": early_reply}
                             log.debug( "sending RPC reply msg: %r" % rep_msg )
-                            self.responder.send(rep_msg)
+                            self.etcd_client.set(self.rpc_res_path + "/" + key, rep_msg)
                             
                         res = func(msg, *args, **kwargs)
 
@@ -163,30 +151,64 @@ class RPCThread(threading.Thread):
                         ### send REPLY
                         ###
                         if early_reply is None:
-                            rep_msg = json.dumps({"RESULT": res})
+                            rep_msg = {"RESULT": res}
                             log.debug( "sending RPC reply msg: %r" % rep_msg )
-                            self.responder.send(rep_msg)
+                            self.etcd_client.set(self.rpc_res_path + "/" + key, rep_msg)
     
                         # post handling
                         if post is not None:
                             log.debug( "RPC post()=%r args=%r" % (post, post_args) )
                             post(msg, *post_args)
                     else:
-                        rep_msg = json.dumps({"RESULT": "unknown command: '%s'" % cmd})
+                        rep_msg = {"RESULT": "unknown command: '%s'" % cmd}
                         log.debug( "sending RPC reply msg: %r" % rep_msg )
-                        self.responder.send(rep_msg)
+                        self.etcd_client.set(self.rpc_res_path + "/" + key, rep_msg)
 
-            except zmq.ZMQError as e:
-                if e.errno == zmq.EAGAIN:
-                    time.sleep(0.001)
-                    continue
-                else:
-                    raise ZMQError(e)
+            except EtcdTimeout:
+                continue
+            except EtcdQueueEmpty:
+                continue
+            except EtcdConnectionFailed:
+                continue
             except Exception as e:
                 log.error(traceback.format_exc())
                 log.error( "Exception in RPC server: %r" % e )
-                log.error( "RPC server: cmd=%s msg=%r" % (cmd, msg) )
+                #log.error( "RPC server: key=%s msg=%r" % (key, msg) )
                 break
 
     def stop(self):
         self.stopping = True
+
+#
+# a little test
+# 
+#
+if __name__ == "__main__":
+    import sys
+    log_level = logging.DEBUG
+    FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
+    logging.basicConfig( stream=sys.stderr, level=log_level, format=FMT )
+
+    etcd_client = EtcdClient()
+    etcd_client.delete("/RPCTEST", recursive=True)
+    etcd_client.write("/RPCTEST/rpc", None, dir=True)
+    etcd_client.write("/RPCTEST/rpc_out", None, dir=True)
+    rpcthr = RPCThread(etcd_client, "/RPCTEST/rpc")
+
+    def echo(a):
+        return "echo: %r" % a
+
+    rpcthr.register_rpc("echo", echo)
+
+    rpcthr.start()
+    print("Waiting 5s")
+    time.sleep(5)
+    print("Sending an echo RPC...")
+    res = send_rpc(etcd_client, "/RPCTEST/rpc", "echo", MSG="abcdef")
+    print("Result = %r" % res)
+    print("Waiting 10s")
+    time.sleep(10)
+    print("Stopping RPCThread")
+    rpcthr.stop()
+
+

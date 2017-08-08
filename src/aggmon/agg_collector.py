@@ -27,9 +27,9 @@ except ImportError:
 
 from Queue import Queue, Empty
 from agg_helpers import *
-from etcd_component import get_kwds, ComponentState
-from etcd_config import Config, DEFAULT_CONFIG_DIR
-from etcd_rpc import *
+from agg_component import get_kwds, ComponentState
+from agg_config import Config, DEFAULT_CONFIG_DIR
+from agg_rpc import *
 from msg_tagger import MsgTagger
 from etcd import EtcdWatchTimedOut
 
