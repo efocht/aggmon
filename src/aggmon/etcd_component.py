@@ -211,6 +211,7 @@ class ComponentState(object):
         self.set_state()
         # and create new repeat timer
         self.timer = RepeatTimer(self.ping_interval, self.set_state)
+        log.info("timer reset")
 
     def set_state(self, state=None):
         if state is None:

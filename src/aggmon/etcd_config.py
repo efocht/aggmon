@@ -43,8 +43,7 @@ DEFAULT_CONFIG = {
         "collector": {
             "cwd": os.getcwd(),
             "cmd": "agg_collector",
-            "cmd_opts": "--listen %(listen)s " +
-            "--hierarchy-url %(hierarchy_url)s --state-file %(statefile)s --dispatcher %(dispatcher)s",
+            "cmd_opts": "--listen %(listen)s --hierarchy-url %(hierarchy_url)s ",
             "component_key": "group:host",
             "listen_port_range": "5262",
             "logfile": "/tmp/%(service)s_%(hierarchy)s_%(hierarchy_key)s.log",
@@ -55,8 +54,7 @@ DEFAULT_CONFIG = {
             "cmd": "agg_datastore",
             "cmd_opts": "--listen %(listen)s " +
             "--dbname \"%(dbname)s\" --host \"%(dbhost)s\" " +
-            "--hierarchy-url %(hierarchy_url)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
-            "cmdport_range": "5100-5199",
+            "--hierarchy-url %(hierarchy_url)s --dbname %(dbname)s",
             "component_key":  "group:host",
             "listen_port_range": "5200-5299",
             "logfile": "/tmp/%(service)s_%(hierarchy)s_%(hierarchy_key)s.log",

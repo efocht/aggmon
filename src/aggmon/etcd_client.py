@@ -141,18 +141,23 @@ class EtcdClient(Client):
         the consumer can use the key for posting a result into a completion queue.
         """
         try:
-            #logger = logging.getLogger("etcd.client")
-            #old_log_level = logger.getEffectiveLevel()
-            #logger.setLevel(logging.CRITICAL)
-            res = self.pop(self.read(qkey, sorted=True, wait=wait, recursive=True, dir=False,
-                                     waitIndex=index, timeout=timeout).children.next().key)
-            #logger.setLevel(old_log_level)
+            # first try to get the entries that are already there
+            chld = self.read(qkey, sorted=True, recursive=True, dir=True,
+                             timeout=timeout).children.next()
+            if chld.dir:
+                # no entry available: block until timeout waiting for new entries
+                chld = self.read(qkey, sorted=True, wait=wait, recursive=True, dir=False,
+                                 timeout=timeout).children.next()
+            res = self.pop(chld.key)
         except EtcdNotFile:
             raise EtcdQueueEmpty
         except TimeoutError:
             raise EtcTimeout
+        except EtcdEventIndexCleared as e:
+            pass
         except Exception as e:
             raise e
+        log.debug("qget: %s : %r" % (res.key, json.loads(res.value)))
         return res.key, json.loads(res.value)
 
     def keys(self, path, strip_parent=False, timeout=None):

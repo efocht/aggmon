@@ -31,6 +31,9 @@ from msg_tagger import MsgTagger
 log = logging.getLogger( __name__ )
 comp = None
 etcd_client = None
+running = True
+kill_services = False
+
 
 # Path Fix
 sys.path.append(
@@ -120,7 +123,7 @@ def calc_hosts_group(groups_config):
 
 
 def aggmon_control(argv):
-    global comp, etcd_client
+    global comp, etcd_client, running, kill_services
 
     ap = argparse.ArgumentParser()
     ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR,
@@ -164,18 +167,21 @@ def aggmon_control(argv):
     kill_services = False
 
     def quit(msg):
+        global running
         comp.rpc.stop()
         running = False
 
     def kill_and_quit(msg):
+        global running, kill_services
         comp.rpc.stop()
-        running = False
         kill_services = True
+        running = False
 
     state = get_kwds(own_groups=pargs.group)
     hostname = platform.node()
     
     comp = ComponentState(etcd_client, "control", "monnodes:/%s" % hostname, state=state)
+    # start before registering RPCs means: consume old RPCs without action
     comp.start()
     #comp.rpc.register_rpc("add_group", add_group)
     #comp.rpc.register_rpc("remove_group", remove_group)
@@ -258,7 +264,7 @@ def aggmon_control(argv):
                             comp.del_data("/components/%s/job/%s" % (svc_type, jobid))
         delay = 20 # seconds
         while running and delay > 0:
-            time.sleep(1000)
+            time.sleep(1)
             delay -= 1
 
     if kill_services:

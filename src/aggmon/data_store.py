@@ -83,25 +83,21 @@ def aggmon_data_store(argv):
     global component
 
     ap = argparse.ArgumentParser()
-    ap.add_argument('-g', '--group', default="universe", action="store", help="group/cluster served by this daemon instance")
+    ap.add_argument('-H', '--hierarchy-url', default="", action="store",
+                    help="position in hierarchy for this component, eg. group:/universe")
     ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR, action="store", help="configuration directory")
-    ap.add_argument('-C', '--cmd-port', default="tcp://0.0.0.0:5511", action="store", help="RPC command port")
-    ap.add_argument('-D', '--dispatcher', default="", action="store", help="agg_control dispatcher RPC command port")
     ap.add_argument('-e', '--expire', default=180, action="store", help="days for expiring value metrics")
     ap.add_argument('-b', '--backend', default="mongodb", action="store", help="database backend(s), comma separated. Default is 'mongodb'.")
-    ap.add_argument('-H', '--host', default="localhost", action="store", help="data store host")
+    ap.add_argument('-N', '--host', default="localhost", action="store", help="data store host")
     ap.add_argument('-n', '--port', default=None, action="store", help="data store port")
     ap.add_argument('-d', '--dbname', default="metricdb", action="store", help="database name")
     ap.add_argument('-P', '--prefix', default="gmetric", action="store", help="collections prefix")
     ap.add_argument('-u', '--user', default="", action="store", help="user name")
     ap.add_argument('-p', '--passwd', default="", action="store", help="password")
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
-    ap.add_argument('-L', '--listen', default="tcp://0.0.0.0:5550", action="store", help="zmq pull port to listen on")
-    ap.add_argument('-M', '--msgbus', default=[], action="append",
-                    help="subscription port(s) for message bus. can be used multiple times.")
     ap.add_argument('-s', '--stats', default=False, action="store_true", help="print statistics info")
     ap.add_argument('-v', '--verbose', type=int, default=0, action="store", help="verbosity")
-    pargs = ap.parse_args(argv)
+    pargs = ap.parse_args(argv[1:])
 
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
