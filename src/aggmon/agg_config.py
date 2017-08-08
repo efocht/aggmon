@@ -52,19 +52,19 @@ DEFAULT_CONFIG = {
         "data_store": {
             "cwd": os.getcwd(),
             "cmd": "agg_datastore",
-            "cmd_opts": "--listen %(listen)s " +
-            "--dbname \"%(dbname)s\" --host \"%(dbhost)s\" " +
-            "--hierarchy-url %(hierarchy_url)s --dbname %(dbname)s",
+            "cmd_opts": "--listen %(listen)s --dbname \"%(dbname)s\" " +
+                        "--host \"%(dbhost)s\" --hierarchy-url %(hierarchy_url)s",
             "component_key":  "group:host",
             "listen_port_range": "5200-5299",
             "logfile": "/tmp/%(service)s_%(hierarchy)s_%(hierarchy_key)s.log",
+            "config_add": "/database",
             "per_group": True
         },
         "job_agg": {
             "cwd": os.getcwd(),
             "cmd": "agg_jobagg",
             "cmd_opts": "--listen %(listen)s --log debug " +
-            "--jobid %(jobid)s --dispatcher %(dispatcher)s %(msgbus_opts)s",
+            "--jobid %(jobid)s",
             "component_key":  "jobid",
             "listen_port_range": "5300-5999",
             "logfile": "/tmp/%(service)s_%(jobid)s.log",
