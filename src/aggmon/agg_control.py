@@ -135,7 +135,7 @@ def aggmon_control(argv):
                     help="logging: info, debug, ...")
     ap.add_argument('-v', '--verbose', type=int, default=0, action="store",
                     help="verbosity")
-    pargs = ap.parse_args(argv[1:])
+    pargs = ap.parse_args(argv)
 
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
@@ -280,5 +280,5 @@ def aggmon_control(argv):
                     
 
 if __name__ == "__main__":
-    aggmon_control(sys.argv)
+    aggmon_control(sys.argv[1:])
 

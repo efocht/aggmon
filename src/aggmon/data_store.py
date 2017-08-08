@@ -97,7 +97,7 @@ def aggmon_data_store(argv):
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
     ap.add_argument('-s', '--stats', default=False, action="store_true", help="print statistics info")
     ap.add_argument('-v', '--verbose', type=int, default=0, action="store", help="verbosity")
-    pargs = ap.parse_args(argv[1:])
+    pargs = ap.parse_args(argv)
 
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"

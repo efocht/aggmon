@@ -349,7 +349,7 @@ def aggmon_collector(argv):
                     help="print statistics info")
     ap.add_argument('-v', '--verbose', type=int, default=0, action="store",
                     help="verbosity")
-    pargs = ap.parse_args(argv[1:])
+    pargs = ap.parse_args(argv)
 
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
@@ -478,4 +478,4 @@ def join_threads(subq):
 
 
 if __name__ == "__main__":
-    aggmon_collector(sys.argv)
+    aggmon_collector(sys.argv[1:])
