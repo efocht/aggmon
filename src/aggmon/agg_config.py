@@ -221,6 +221,23 @@ class Config(object):
         log.debug("Config.get path=%s v=%r" % (path, d))
         return d
 
+    def delete(self, path):
+        """
+        Delete the content of a config path.
+        """
+        if not path.startswith("/"):
+            raise EtcdInvalidKey
+        if not path.startswith(ETCD_CONFIG_ROOT):
+            path = ETCD_CONFIG_ROOT + path
+        try:
+            res = self.etcd_client.deserialize(path)
+            isdir = False
+            if isinstance(res, dict):
+                isdir = True
+            self.etcd_client.delete(path, recursive=True, dir=isdir)
+        except Exception as e:
+            log.error("Deleting '%s' failed. %r" % (path, e))
+
     def get(self, path):
         """
         Get the content of a path inside the config in etcd as a
