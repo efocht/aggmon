@@ -1,0 +1,14 @@
+#!/usr/bin/env python2
+import os
+import sys
+
+_BIN_PATH_ = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__))))
+_SRC_PATH_ = os.path.join(_BIN_PATH_, "..", "src")
+if os.path.isdir("../src/aggmon"):
+    sys.path.append(_SRC_PATH_)
+if "PATH" in os.environ:
+    os.environ["PATH"] = _BIN_PATH_ + ":" + os.environ["PATH"]
+
+if __name__ == "__main__":
+    from aggmon.hierarchy_cmd import hierarchy_cmd
+    hierarchy_cmd(sys.argv[1:])

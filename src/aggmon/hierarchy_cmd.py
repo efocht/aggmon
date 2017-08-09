@@ -15,19 +15,7 @@ from agg_rpc import send_rpc
 log = logging.getLogger( __name__ )
 
 
-def dict_from_args(*args):
-    res = {}
-    for i in xrange(len(args)/2):
-        key = args[2*i]
-        if len(args) >= 2*i + 2:
-            value = args[2*i+1]
-            res[key] = value
-        else:
-            break
-    return res
-
-
-def aggmon_hierarchy(argv):
+def hierarchy_cmd(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument('-l', '--log', default="info", action="store", help="logging: info, debug, ...")
     action = ap.add_mutually_exclusive_group(required=True)
@@ -108,4 +96,4 @@ def aggmon_hierarchy(argv):
                 sys.exit(1)
 
 if __name__ == "__main__":
-    aggmon_hierarchy(sys.argv[1:])
+    hierarchy_cmd(sys.argv[1:])
