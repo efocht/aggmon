@@ -43,7 +43,10 @@ if __name__ == "__main__":
     pp = pprint.PrettyPrinter(indent=4)
     #pp.pprint(DEFAULT_CONFIG)
     print "store config object in etcd..."
-    client.serialize("/config", DEFAULT_CONFIG)
+    try:
+        client.serialize("/config", DEFAULT_CONFIG)
+    except:
+        client.update("/config", DEFAULT_CONFIG)
     print "retrieve config object from etcd..."
     config = client.deserialize("/config")
     sys.stdout.write("compare...")
@@ -53,9 +56,10 @@ if __name__ == "__main__":
         comp(DEFAULT_CONFIG, config)
     else:
         print " ok"
-    print "watch /config recusively for changes (max 30 sec)..."
-    res = client.watch("/config", timeout=30, recursive=True)
-    print type(res), repr(res)
+#    print "watch /config recusively for changes (max 30 sec)..."
+#    res = client.watch("/config", timeout=30, recursive=True)
+#    print type(res), repr(res)
+
     print "delete /config..."
     client.delete("/config",  recursive=True)
 
