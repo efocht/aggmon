@@ -232,6 +232,19 @@ class Config(object):
             path = ETCD_CONFIG_ROOT + path
         return self.etcd_client.deserialize(path)
 
+    def set(self, path, data):
+        """
+        Store config data under the given path.
+        """
+        if not path.startswith("/"):
+            raise EtcdInvalidKey
+        if not path.startswith(ETCD_CONFIG_ROOT):
+            path = ETCD_CONFIG_ROOT + path
+        try:
+            return self.etcd_client.update(path, data)
+        except Exception as e:
+            log.warning("Etcd error while saving config data (%s): %r" % (path, e))
+
     def init_etcd(self):
         """
         Initialize etcd config with values loaded from config files.
