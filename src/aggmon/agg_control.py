@@ -146,6 +146,10 @@ def aggmon_control(argv):
         sys.exit(1)
     
     etcd_client = EtcdClient()
+    if not etcd_client:
+        log.error("Could not connect to etcd!")
+        sys.exit(1)
+
     config = Config(etcd_client, config_dir=pargs.config)
     config.init_etcd()
 
