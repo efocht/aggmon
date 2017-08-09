@@ -41,7 +41,7 @@ if __name__ == "__main__":
     print "machines in etcd cluster: %s" % str(client.machines)
     print "etcd cluster leader: %s" % str(client.leader)
     pp = pprint.PrettyPrinter(indent=4)
-    #pp.pprint(DEFAULT_CONFIG)
+    pp.pprint(DEFAULT_CONFIG)
     print "store config object in etcd..."
     try:
         client.serialize("/config", DEFAULT_CONFIG)

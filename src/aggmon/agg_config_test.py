@@ -1,3 +1,4 @@
+from etcd_client import EtcdQueueEmpty, EtcdTimeout, EtcdClient
 from agg_config import *
 import pprint
 
@@ -13,7 +14,13 @@ def comp(a, b):
             print a, "!=", b
 
 if __name__ == "__main__":
-    config = Config(config=DEFAULT_CONFIG, config_dir="../../config.d")
+    client = EtcdClient()
+    config = Config(etcd_client=client, config_dir="../../config.d")
+    try:
+        config.reinit_etcd()
+    except:
+        client.delete("/config", recursive=True)
+        config.init_etcd()
     pp = pprint.PrettyPrinter(indent=4)
     pp.pprint(config.get("/"))
 
