@@ -109,9 +109,7 @@ def aggmon_cmd(argv):
     rawp.add_argument('args', nargs='+', help="raw command and arguments, arguments coming as key value pairs. "
                       + "Example: test_rpc key1 val1 key2 val2")
 
-    import pdb
-    #pdb.set_trace()
-    pargs = ap.parse_args(argv[1:])
+    pargs = ap.parse_args(argv)
 
     log_level = eval("logging."+pargs.log.upper())
     FMT = "%(asctime)s %(levelname)-5.5s [%(name)s][%(threadName)s] %(message)s"
@@ -146,4 +144,4 @@ def aggmon_cmd(argv):
     print json.dumps(result)
 
 if __name__ == "__main__":
-    aggmon_cmd(sys.argv)
+    aggmon_cmd(sys.argv[1:])

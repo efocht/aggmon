@@ -350,4 +350,4 @@ def aggmon_jobagg(argv):
 
 
 if __name__ == "__main__":
-    aggmon_jobagg(sys.argv)
+    aggmon_jobagg(sys.argv[1:])

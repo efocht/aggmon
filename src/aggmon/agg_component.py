@@ -284,8 +284,10 @@ class ComponentControl(object):
         locals().update(kwds)
         svc_info = self.config.get("/services/%s" % service)
         cwd = svc_info["cwd"]
-        cmd = svc_info["cmd"]
         cmd_opts = svc_info["cmd_opts"]
+        if "config_add" in svc_info:
+            add_config = self.config.get(svc_info["config_add"])
+            locals().update(add_config)
         if "listen_port_range" in svc_info:
             listen = "tcp://0.0.0.0:%s" % svc_info["listen_port_range"]
         # register callback
@@ -295,7 +297,10 @@ class ComponentControl(object):
         try:
             if "logfile" in svc_info:
                 logfile = svc_info["logfile"] % locals()
-            cmd = which(cmd)
+            cmd = which(svc_info["cmd"])
+            if cmd is None:
+                log.error("Could not find command '%s' in PATH!" % svc_info["cmd"])
+                return
             cmd_opts = cmd_opts % locals()
             cmd = cmd + " " + cmd_opts
             exec_cmd = self.config.get("/global/local_cmd") % locals()

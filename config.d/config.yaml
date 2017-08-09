@@ -23,7 +23,7 @@ config:
             logfile: /tmp/%(service)s_%(jobid)s.log
     database:
         dbname: metricdb
-        dbhost: ""
+        dbhost: "localhost:27017"
         user: ""
         password: ""
     global:
