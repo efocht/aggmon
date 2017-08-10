@@ -374,7 +374,7 @@ def aggmon_collector(argv):
 
     etcd_client = EtcdClient()
     config = Config(etcd_client)
-    comp = ComponentState(etcd_client, "collector", pargs.hierarchy_url, state=state)
+    comp = ComponentState(etcd_client, "collector", pargs.hierarchy_url)
 
     state = {}
     saved_subs = comp.get_data("/subs")
@@ -394,15 +394,15 @@ def aggmon_collector(argv):
         log.error("Failed to initialize something essential. Exiting.")
         os._exit(1)
 
+    me_addr = own_addr_for_tgt("8.8.8.8")
+    me_listen = "tcp://%s:%d" % (me_addr, subq.port)
+    state = get_kwds(listen=me_listen)
+    comp.update_state_cache(state)
+
     pubsub.start()
     subq.start()
     comp.start()
     atexit.register(join_threads, subq)
-
-    me_addr = own_addr_for_tgt("8.8.8.8")
-    me_listen = "tcp://%s:%d" % (me_addr, subq.port)
-    state = get_kwds(listen=me_listen)
-    comp.update_state(state)
 
     #
     # RPC functions and helpers
@@ -423,8 +423,8 @@ def aggmon_collector(argv):
     comp.rpc.register_rpc("show_subs", pubsub.show_subscriptions)
     comp.rpc.register_rpc("reset_subs", pubsub.reset_subscriptions, post=save_subs_data)
     comp.rpc.register_rpc("add_tag", tagger.add_tag, post=save_tags_data)
-    comp.rpc.register_rpc("remove_tag", tagger.remove_tag, post=save_tags_data))
-    comp.rpc.register_rpc("reset_tags", tagger.reset_tags, post=save_tags_data))
+    comp.rpc.register_rpc("remove_tag", tagger.remove_tag, post=save_tags_data)
+    comp.rpc.register_rpc("reset_tags", tagger.reset_tags, post=save_tags_data)
     comp.rpc.register_rpc("show_tags", tagger.show_tags)
     comp.rpc.register_rpc("quit", quit, early_reply=True)
     comp.rpc.register_rpc("resend_state", comp.reset_timer)
@@ -452,7 +452,7 @@ def aggmon_collector(argv):
         # 
         # remove tags for closed jobs
         #
-        for jobid set(jobs_tagger) - set(jobs_config):
+        for jobid in set(jobs_tagger) - set(jobs_config):
             tagger.remove_tag(get_kwds(TAG_KEY="J", TAG_VALUE=jobid))
             #
             # unsubscribe subscribers with this job ID

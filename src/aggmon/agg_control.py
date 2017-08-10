@@ -170,6 +170,9 @@ def aggmon_control(argv):
     running = True
     kill_services = False
 
+    def reload_config(msg):
+        return config.reinit_etcd()
+
     def quit(msg):
         global running
         comp.rpc.stop()
@@ -192,6 +195,7 @@ def aggmon_control(argv):
     #comp.rpc.register_rpc("show_groups", show_groups)
     comp.rpc.register_rpc("killquit", kill_and_quit, early_reply=True)
     comp.rpc.register_rpc("quit", quit, early_reply=True)
+    comp.rpc.register_rpc("reload_config", reload_config)
 
     control = ComponentControl(config, etcd_client, comp)
 
@@ -276,12 +280,15 @@ def aggmon_control(argv):
         for svc_type in own_services.keys():
             for hierarchy in own_services[svc_type].keys():
                 for hierarchy_key in own_services[svc_type][hierarchy].keys():
-                    svc_state = comp.get_state(svc_type, "job:/%s" % jobid)
+                    hpath = config.get("hierarchy/%s/%s/hpath" %
+                                       (hierarchy, hierarchy_key))
+                    svc_state = comp.get_state(svc_type, "%s:/%s" % (hierarchy, hpath))
                     if svc_state is not None:
-                        control.kill_component(svc_type, "job:/%s" % jobid)
-                        comp.del_data("/components/%s/job/%s" % (svc_type, jobid))
+                        control.kill_component(svc_type, "%s:/%s" % (hierarchy, hpath))
+                        comp.del_data("/components/%s/%s/%s" %
+                                      (svc_type, hierarchy, hierarchy_key))
     os._exit(0)
-                    
+
 
 if __name__ == "__main__":
     aggmon_control(sys.argv[1:])

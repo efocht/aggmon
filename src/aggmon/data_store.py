@@ -14,9 +14,9 @@ except ImportError:
     import json
 import zmq
 from Queue import Queue, Empty
-from agg_component import get_kwds, ComponentState
+from agg_component import get_kwds, ComponentState, hierarchy_from_url
 from agg_rpc import *
-from config import Config, DEFAULT_CONFIG_DIR
+from agg_config import Config, DEFAULT_CONFIG_DIR
 # Path Fix
 sys.path.append(
     os.path.abspath(
@@ -45,9 +45,11 @@ class DataStore(threading.Thread):
             # TODO: add backend selection to config file
             log.debug("create %s store: %s:%s, %s" % (backend, hostname, str(port), db_name))
             if backend == "mongodb":
-                store = MongoDBMetricStore(hostname=hostname, port=port, db_name=db_name, username=username, password=password, group=group)
+                store = MongoDBMetricStore(hostname=hostname, port=port, db_name=db_name,
+                                           username=username, password=password, group=group)
             elif backend == "influxdb":
-                store = InfluxDBMetricStore(hostname=hostname, port=port, db_name=db_name, username=username, password=password, group=group)
+                store = InfluxDBMetricStore(hostname=hostname, port=port, db_name=db_name,
+                                            username=username, password=password, group=group)
             if store is None:
                 raise Exception("Could not connect to backend %s" % backend)
             self.store.append(store)
@@ -107,8 +109,12 @@ def aggmon_data_store(argv):
 
     if len(pargs.hierarchy_url) == 0:
         log.error("No hierarchy URL provided for this component. Use the -H option!")
-        sys.exit(1)
-    
+        os._exit(1)
+    hierarchy, component_id, hierarchy_path = hierarchy_from_url(pargs.hierarchy_url)
+    if hierarchy != "group":
+        log.error("Hierarchy '%(hierarchy)s' is currently not supported for data store." % locals())
+        os._exit(1)
+
     etcd_client = EtcdClient()
     config = Config(etcd_client)
     comp = ComponentState(etcd_client, "data_store", pargs.hierarchy_url)
@@ -118,13 +124,16 @@ def aggmon_data_store(argv):
         pargs.port = pargs.port.split(",")      # TODO: get rid of this and move it into (shared) config
     else:
         pargs.port = [None, None]
+
+    pdb.set_trace()
     # open DB
     try:
-        store = DataStore(pargs.backend, pargs.host, pargs.port, pargs.dbname, pargs.user, pargs.passwd,
-                           pargs.group, coll_prefix=pargs.prefix, value_metrics_ttl=pargs.expire*24*3600)
+        store = DataStore(pargs.backend, pargs.host, pargs.port, pargs.dbname,
+                          pargs.user, pargs.passwd, hierarchy_path,
+                          coll_prefix=pargs.prefix, value_metrics_ttl=pargs.expire*24*3600)
     except Exception as e:
         log.error("Failed to create DataStore: %r" % e)
-        sys.exit(1)
+        os._exit(1)
     store.start()
 
     context = zmq.Context()
@@ -138,7 +147,7 @@ def aggmon_data_store(argv):
     me_addr = zmq_own_addr_for_uri(pargs.dispatcher)
     me_listen = "tcp://%s:%d" % (me_addr, recv_port)
     state = get_kwds(listen=me_listen)
-    comp.update_state(state)
+    comp.update_state_cache(state)
 
     def subscribe_collectors(__msg):
         for msgb in pargs.msgbus:
@@ -180,7 +189,7 @@ def aggmon_data_store(argv):
                 tstart = time.time()
                 msgs_count = 0
             msgs_count += 1
-            comp.update_state({"stats.msgs_recvd": count})
+            comp.update_state_cache({"stats.msgs_recvd": count})
             if (pargs.stats and count % 100000 == 0):
                 tend = time.time()
                 sys.stdout.write("%d msgs in %f seconds, %f msg/s\n" %
