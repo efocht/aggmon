@@ -253,6 +253,7 @@ def aggmon_jobagg(argv):
     me_listen = "tcp://%s:%d" % (me_addr, recv_port)
     state = get_kwds(listen=me_listen, jobid=pargs.jobid)
     component = ComponentState(etcd_client, "job_agg", pargs.hierarchy_url, state=state)
+    component.start()
 
     collectors_rpc_paths = []
     for cstate in component.iter_components_state(component_type="collector"):
@@ -294,9 +295,12 @@ def aggmon_jobagg(argv):
                      J=pargs.jobid)
 
     def unsubscribe_and_quit(__msg):
+        global main_stopping
         for rpc_path in collectors_rpc_paths:
             log.info( "unsubscribing jobid %s from %s" % (pargs.jobid, rpc_path) )
             send_rpc(etcd_client, rpc_path, "unsubscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port))
+        main_stopping = True
+        time.sleep(10)
         os._exit(0)
 
 
