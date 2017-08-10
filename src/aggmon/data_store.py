@@ -85,6 +85,8 @@ def aggmon_data_store(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument('-H', '--hierarchy-url', default="", action="store",
                     help="position in hierarchy for this component, eg. group:/universe")
+    ap.add_argument('-L', '--listen', default="tcp://127.0.0.1:5555",
+                    action="store", help="zmq pull port to listen on")
     ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR, action="store", help="configuration directory")
     ap.add_argument('-e', '--expire', default=180, action="store", help="days for expiring value metrics")
     ap.add_argument('-b', '--backend', default="mongodb", action="store", help="database backend(s), comma separated. Default is 'mongodb'.")
