@@ -220,11 +220,12 @@ def aggmon_agg(argv):
         log.error("No hierarchy URL provided for this component. Use the -H option!")
         sys.exit(1)
     hierarchy, hkey, hpath = hierarchy_from_url(pargs.hierarchy_url)
-    if hierachy not in ("group", "job"):
+    if hierarchy not in ("group", "job"):
         log.error("Wrong hierarchy. Aggregator only supports 'group' and 'job'.")
         sys.exit(1)
 
-    config = Config(config_dir=pargs.config)
+    etcd_client = EtcdClient()
+    config = Config(etcd_client, config_dir=pargs.config)
     scheduler = Scheduler()
     scheduler.start()
 
@@ -247,7 +248,6 @@ def aggmon_agg(argv):
     recv_port = socket_bind_range(receiver, pargs.listen)
     assert(recv_port is not None)
 
-    etcd_client = EtcdClient()
     me_addr = own_addr_for_tgt("8.8.8.8")
     me_listen = "tcp://%s:%d" % (me_addr, recv_port)
     state = get_kwds(listen=me_listen)
