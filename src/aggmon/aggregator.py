@@ -20,7 +20,7 @@ from agg_mcache import MCache
 from agg_component import get_kwds, ComponentState, hierarchy_from_url
 from agg_rpc import *
 import basic_aggregators as aggs
-from config import Config, DEFAULT_CONFIG_DIR
+from agg_config import Config, DEFAULT_CONFIG_DIR
 from repeat_event import RepeatEvent
 from scheduler import Scheduler
 
@@ -219,7 +219,7 @@ def aggmon_agg(argv):
     if len(pargs.hierarchy_url) == 0:
         log.error("No hierarchy URL provided for this component. Use the -H option!")
         sys.exit(1)
-    hierarchy, hkey, hpath = hierarchy_from_url(hierarchy_url)
+    hierarchy, hkey, hpath = hierarchy_from_url(pargs.hierarchy_url)
     if hierachy not in ("group", "job"):
         log.error("Wrong hierarchy. Aggregator only supports 'group' and 'job'.")
         sys.exit(1)
