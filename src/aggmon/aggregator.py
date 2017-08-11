@@ -247,22 +247,24 @@ def aggmon_agg(argv):
     receiver.setsockopt(zmq.RCVHWM, 40000)
     receiver.setsockopt(zmq.RCVTIMEO, 1000)
     receiver.setsockopt(zmq.LINGER, 0)
-    recv_port = socket_bind_range(receiver, pargs.listen)
+    recv_port = zmq_socket_bind_range(receiver, pargs.listen)
     assert(recv_port is not None)
 
     me_addr = own_addr_for_tgt("8.8.8.8")
     me_listen = "tcp://%s:%d" % (me_addr, recv_port)
     state = get_kwds(listen=me_listen)
-    comp = ComponentState(etcd_client, "job_agg", pargs.hierarchy_url, state=state)
+    comp = ComponentState(etcd_client, "aggregator", pargs.hierarchy_url, state=state)
     comp.start()
 
     collectors_rpc_paths = []
     for cstate in comp.iter_components_state(component_type="collector"):
         if hierarchy == "job":
             collectors_rpc_paths.append(cstate["rpc_path"])
-        elif hierarchy == "group" and cstate["hierarchy_url"] == pargs.hierarchy_url:
-            collectors_rpc_paths.append(cstate["rpc_path"])
-
+        elif hierarchy == "group":
+            if "hierarchy_url" in cstate and cstate["hierarchy_url"] == pargs.hierarchy_url:
+                collectors_rpc_paths.append(cstate["rpc_path"])
+            else:
+                pass
 
     def resolve_push_target(hierarchy_url, target):
         url = None
@@ -342,6 +344,9 @@ def aggmon_agg(argv):
     comp.rpc.register_rpc("show_mcache", show_mcache)
     comp.rpc.register_rpc("resend_state", comp.reset_timer)
 
+    # TODO: make this react to configuration changes
+    #       and retry to subscribe to collectors that are temporarily not available
+    #       or not yet available.
     make_timers()
 
     tstart = None

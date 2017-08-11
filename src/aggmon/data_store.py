@@ -126,7 +126,7 @@ def aggmon_data_store(argv):
     else:
         pargs.port = [None, None]
 
-    pdb.set_trace()
+    #pdb.set_trace()
     # open DB
     try:
         store = DataStore(pargs.backend, pargs.host, pargs.port, pargs.dbname,

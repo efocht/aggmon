@@ -216,7 +216,6 @@ def aggmon_control(argv):
         hosts_group = calc_hosts_group(groups_config)
         own_jobids = filter_group_jobs(jobs_config, hosts_group, own_groups_hpath)
 
-        pdb.set_trace()
         # loop over services
         for svc_type in services_config.keys():
             svc_cfg = services_config[svc_type]
