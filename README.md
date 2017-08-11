@@ -132,3 +132,50 @@ In the example above the first block aggregates a single metric called "load_one
 The second aggregation block computes the maximum cpu temperature (__cpu_temp__) for the nodes of a job. It inherits attributes from two templates and overwrites the __agg_type__.
 
 The third example is aggregating all metrics that contain the string "likwid" in their name to 10 percent percentiles (__quant10__ aggregation type). The result is a vector of 11 values plus the average of all values. This aggregation block is using no templates.
+
+
+## RPC / Commands
+
+Components can be controlled by commands which are send through RPCs. The syntax is:
+
+--
+agg_cmd --component|-C <component_type> --hierarchy-url|-H <hierarchy_url> raw <command> [key value ...]
+--
+
+Example:
+
+--
+agg_cmd -C control -H monnodes:/node1 raw killquit
+--
+
+**Commands list:**
+
+controll:
+- quit
+- killquit
+- reload_config
+
+collector:
+- quit
+- resend_state
+- subscribe
+- unsubscribe
+- show_subs
+- reset_subs
+- add_tag
+- remove_tag
+- reset_tags
+- show_tags
+
+data_store:
+- quit
+- resubscribe
+- resend_state
+- reset_stats
+
+job_aggregator:
+
+
+## Notes
+
+etcd version >2.3 is required. etcd v3 does not work.
