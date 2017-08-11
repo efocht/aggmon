@@ -1,3 +1,4 @@
 export PYTHONPATH=`pwd`/src:$PYTHONPATH
+export PATH=`pwd`/bin:$PATH
 ss -tln | grep -q ":2379[[:space:]]" || export ETCDHOST=vsca1
 
