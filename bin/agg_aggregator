@@ -8,5 +8,5 @@ if os.path.isdir("../src/aggmon"):
     sys.path.append(_SRC_PATH_)
 
 if __name__ == "__main__":
-    from aggmon.agg_job_agg import aggmon_jobagg
-    aggmon_jobagg(sys.argv[1:])
+    from aggmon.aggregator import aggmon_agg
+    aggmon_agg(sys.argv[1:])

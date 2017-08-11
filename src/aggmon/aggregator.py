@@ -17,7 +17,7 @@ import zmq
 from Queue import Queue, Empty
 from agg_helpers import *
 from agg_mcache import MCache
-from agg_component import get_kwds, ComponentState
+from agg_component import get_kwds, ComponentState, hierarchy_from_url
 from agg_rpc import *
 import basic_aggregators as aggs
 from config import Config, DEFAULT_CONFIG_DIR
@@ -26,7 +26,6 @@ from scheduler import Scheduler
 
 
 log = logging.getLogger( __name__ )
-component = None
 main_stopping = False
 
 
@@ -79,9 +78,9 @@ class ZMQ_Push(object):
         return True
 
 
-class JobAggregator(threading.Thread):
-    def __init__(self, jobid, zmq_context):
-        self.jobid = jobid
+class Aggregator(threading.Thread):
+    def __init__(self, hierarchy_url, zmq_context):
+        self.hierarchy, self.hkey, self.hpath = hierarchy_from_url(hierarchy_url)
         self.queue = Queue()
         # every metric is stored in a separate mcache, such that we can quickly aggregate its values
         self.metric_caches = {}
@@ -133,7 +132,9 @@ class JobAggregator(threading.Thread):
             # can lead to the same (H, N, T) index in the database. The risk is limited if
             # T is a float.
             #
-            metric = {"H": "", "N": agg_metric, "J": self.jobid, "T": now, "V": agg_value}
+            metric = {"H": "", "N": agg_metric, "T": now, "V": agg_value}
+            if self.hierarchy == "job":
+                metric["J"] = self.hkey
             log.debug("agg metric = %r, pushing it to %s" % (metric, push_target))
             rc = self.zmq_push.send(push_target, metric)
             if rc:
@@ -141,7 +142,7 @@ class JobAggregator(threading.Thread):
         return num_sent
 
     def run(self):
-        log.info( "[Started JobAggregator Thread]" )
+        log.info( "[Started Aggregator Thread %s:%s]" % (self.hierarchy, self.hpath))
         self.req_worker()
 
     def req_worker(self):
@@ -190,14 +191,15 @@ def sig_handler(signum, stack):
         main_stopping = True
 
             
-def aggmon_jobagg(argv):
-    global component, main_stopping
+def aggmon_agg(argv):
+    global main_stopping
 
     ap = argparse.ArgumentParser()
     ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR,
                     action="store", help="configuration directory")
     ap.add_argument('-H', '--hierarchy-url', default="", action="store",
-                    help="position in hierarchy for this component, eg. group:/universe")
+                    help="Position in hierarchy for this component, eg. job:/12552" +
+                    " or group:/universe")
     ap.add_argument('-l', '--log', default="info", action="store",
                     help="logging: info, debug, ...")
     ap.add_argument('-L', '--listen', default="tcp://127.0.0.1:5560",
@@ -217,15 +219,12 @@ def aggmon_jobagg(argv):
     if len(pargs.hierarchy_url) == 0:
         log.error("No hierarchy URL provided for this component. Use the -H option!")
         sys.exit(1)
-
-    component = None
-
-    config = Config(config_dir=pargs.config)
-
-    if len(pargs.jobid) == 0:
-        log.error("jobid argument can not be empty!")
+    hierarchy, hkey, hpath = hierarchy_from_url(hierarchy_url)
+    if hierachy not in ("group", "job"):
+        log.error("Wrong hierarchy. Aggregator only supports 'group' and 'job'.")
         sys.exit(1)
 
+    config = Config(config_dir=pargs.config)
     scheduler = Scheduler()
     scheduler.start()
 
@@ -234,11 +233,11 @@ def aggmon_jobagg(argv):
 
     zmq_context = zmq.Context()
     try:
-        jagg = JobAggregator(pargs.jobid, zmq_context)
+        agg = Aggregator(pargs.hierarchy_url, zmq_context)
     except Exception as e:
-        log.error("Failed to create JobAggregator: %r" % e)
+        log.error("Failed to create Aggregator %s : %r" % (pargs.hierarchy_url, e))
         sys.exit(1)
-    jagg.start()
+    agg.start()
 
     # Socket to receive messages on
     receiver = zmq_context.socket(zmq.PULL)
@@ -251,48 +250,57 @@ def aggmon_jobagg(argv):
     etcd_client = EtcdClient()
     me_addr = own_addr_for_tgt("8.8.8.8")
     me_listen = "tcp://%s:%d" % (me_addr, recv_port)
-    state = get_kwds(listen=me_listen, jobid=pargs.jobid)
-    component = ComponentState(etcd_client, "job_agg", pargs.hierarchy_url, state=state)
-    component.start()
+    state = get_kwds(listen=me_listen)
+    comp = ComponentState(etcd_client, "job_agg", pargs.hierarchy_url, state=state)
+    comp.start()
 
     collectors_rpc_paths = []
-    for cstate in component.iter_components_state(component_type="collector"):
-        collectors_rpc_paths.append(cstate.value["rpc_path"])
+    for cstate in comp.iter_components_state(component_type="collector"):
+        if hierarchy == "job":
+            collectors_rpc_paths.append(cstate["rpc_path"])
+        elif hierarchy == "group" and cstate["hierarchy_url"] == pargs.hierarchy_url:
+            collectors_rpc_paths.append(cstate["rpc_path"])
+
 
     def aggregate_rpc(msg):
         _aggregate_rpc(**msg)
 
     def _aggregate_rpc(**msg):
-        agg_rpcs = component.state.get("stats.agg_rpcs", 0)
+        agg_rpcs = comp.state.get("stats.agg_rpcs", 0)
         agg_rpcs += 1
-        num_sent = jagg.do_aggregate_and_send(msg)
-        aggs_sent = component.state.get("stats.aggs_sent", 0) + num_sent
-        component.update({"stats.agg_rpcs": agg_rpcs, "stats.aggs_sent": aggs_sent})
+        num_sent = agg.do_aggregate_and_send(msg)
+        aggs_sent = comp.state.get("stats.aggs_sent", 0) + num_sent
+        comp.update_state_cache({"stats.agg_rpcs": agg_rpcs, "stats.aggs_sent": aggs_sent})
 
     def make_timers():
         """
         Create one timer for each aggregator config. An aggregator config can
         trigger the aggregation of multiple metrics.
         """
-    
         timers = []
         for cfg in config.get("/aggregate"):
-            if cfg["agg_class"] == "job":
+            if hierarchy == cfg["agg_class"]:
                 interval = cfg["interval"]
                 t = RepeatEvent(scheduler, interval, _aggregate_rpc, **cfg)
                 timers.append(t)
-        log.info("made timers for jobid '%s': %r" % (pargs.jobid, timers))
+        log.info("made timers for '%s': %r" % (pargs.hierarchy_url, timers))
         return timers
 
     def show_mcache(msg):
-        return jagg.metric_caches
+        return agg.metric_caches
 
     def subscribe_collectors(__msg):
-        # subscribe to collectors
+        #
+        # if working as job aggregator: subscribe to all collectors with jobid as filter
+        # if working as group aggregator: subscribe to the group's collector(s)
+        #
+        kwds = {}
+        if hierarchy == "job":
+            kwds["J"] = hkey
         for rpc_path in collectors_rpc_paths:
-            log.info( "subscribing to msgs of job %s at %s" % (pargs.jobid, rpc_path) )
-            send_rpc(etcd_client, rpc_path, "subscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port),
-                     J=pargs.jobid)
+            log.info( "subscribing to %s, filter = %r" % (rpc_path, kwds) )
+            send_rpc(etcd_client, rpc_path, "subscribe",
+                     TARGET="tcp://%s:%d" % (me_addr, recv_port), **kwds)
 
     def unsubscribe_and_quit(__msg):
         global main_stopping
@@ -307,11 +315,11 @@ def aggmon_jobagg(argv):
     # subscribe to collectors
     subscribe_collectors(None)
 
-    component.rpc.register_rpc("agg", aggregate_rpc)
-    component.rpc.register_rpc("quit", unsubscribe_and_quit, early_reply=True)
-    component.rpc.register_rpc("resubscribe", subscribe_collectors)
-    component.rpc.register_rpc("show_mcache", show_mcache)
-    component.rpc.register_rpc("resend_state", component.reset_timer)
+    comp.rpc.register_rpc("agg", aggregate_rpc)
+    comp.rpc.register_rpc("quit", unsubscribe_and_quit, early_reply=True)
+    comp.rpc.register_rpc("resubscribe", subscribe_collectors)
+    comp.rpc.register_rpc("show_mcache", show_mcache)
+    comp.rpc.register_rpc("resend_state", comp.reset_timer)
 
     make_timers()
 
@@ -324,12 +332,12 @@ def aggmon_jobagg(argv):
             #log.debug("received msg on PULL port: %r" % s)
             msg = json.loads(s)
 
-            jagg.queue.put(msg)
+            agg.queue.put(msg)
             if count == 0:
                 tstart = time.time()
                 count = 0
             count += 1
-            component.update({"stats.val_msgs_recvd": count})
+            comp.update_state_cache({"stats.val_msgs_recvd": count})
             if (pargs.stats and count % 10000 == 0):
                 tend = time.time()
                 sys.stderr.write("%d msgs in %f seconds, %f msg/s\n" %
@@ -339,19 +347,19 @@ def aggmon_jobagg(argv):
             continue
         except Exception as e:
             print "Exception in msg receiver: %r" % e
-            jagg.stopping = True
+            agg.stopping = True
             break
 
     time.sleep(0.1)
     print "%d messages received" % count
     #pdb.set_trace()
-    component.rpc.stop()
-    component.rpc.join()
-    jagg.stopping = True
+    comp.rpc.stop()
+    comp.rpc.join()
+    agg.stopping = True
     scheduler.stop()
     scheduler.join()
     os._exit(0)
 
 
 if __name__ == "__main__":
-    aggmon_jobagg(sys.argv[1:])
+    aggmon_agg(sys.argv[1:])

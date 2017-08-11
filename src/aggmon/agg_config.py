@@ -60,16 +60,17 @@ DEFAULT_CONFIG = {
             "config_add": "/database",
             "per_group": True
         },
-        "job_agg": {
+        "aggregator": {
             "cwd": os.getcwd(),
-            "cmd": "agg_jobagg",
-            "cmd_opts": "--listen %(listen)s --log debug " +
-            "--jobid %(jobid)s",
+            "cmd": "agg_aggregator",
+            "cmd_opts": "--listen %(listen)s " +
+            "--hierarchy-url %(hierarchy_url)s",
             "component_key":  "jobid",
             "listen_port_range": "5300-5999",
-            "logfile": "/tmp/%(service)s_%(jobid)s.log",
+            "logfile": "/tmp/%(service)s_%(hierarchy_key)s.log",
             "min_nodes": 4,
-            "per_job": True
+            "per_job": True,
+            "per_group": True
         }
     },
     "database": {
