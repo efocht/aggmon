@@ -17,7 +17,8 @@ import zmq
 from Queue import Queue, Empty
 from agg_helpers import *
 from agg_mcache import MCache
-from agg_component import get_kwds, ComponentState, hierarchy_from_url
+from agg_component import get_kwds, ComponentState
+from hierarchy_helpers import hierarchy_from_url, parent_hierarchy_url, top_config_hierarchy_url
 from agg_rpc import *
 import basic_aggregators as aggs
 from agg_config import Config, DEFAULT_CONFIG_DIR
@@ -55,6 +56,7 @@ invoked when the job ends and the job tagging for it is unregistered.
  cmd : "quit"
 
 """
+
 
 class ZMQ_Push(object):
     def __init__(self, zmq_context):
@@ -262,6 +264,18 @@ def aggmon_agg(argv):
             collectors_rpc_paths.append(cstate["rpc_path"])
 
 
+    def resolve_push_target(hierarchy_url, target):
+        url = None
+        if target in ("@TOP_GROUP", "@TOP_STORE"):
+            url = top_config_hierarchy_url(config, "group")
+        elif target == "@PARENT":
+            url = parent_hierarchy_url(hierarchy_url)
+        try:
+            store = comp.get_state("data_store", url)
+            return store["listen"]
+        except:
+            return None
+
     def aggregate_rpc(msg):
         _aggregate_rpc(**msg)
 
@@ -279,6 +293,13 @@ def aggmon_agg(argv):
         """
         timers = []
         for cfg in config.get("/aggregate"):
+            if "push_target" in cfg and cfg["push_target"].startswith("@"):
+                push_target = resolve_push_target(pargs.hierarchy_url, cfg["push_target"])
+                if push_target is None:
+                    log.error("Could not resolve push_target '%s' for aggregator at %s" %
+                              (cfg["push_target"], pargs.hierarchy_url))
+                    continue
+                cfg["push_target"] = push_target
             if hierarchy == cfg["agg_class"]:
                 interval = cfg["interval"]
                 t = RepeatEvent(scheduler, interval, _aggregate_rpc, **cfg)

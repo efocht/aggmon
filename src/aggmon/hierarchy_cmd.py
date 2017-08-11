@@ -7,7 +7,7 @@ import time
 import json
 from etcd import *
 from etcd_client import EtcdClient
-from agg_component import hierarchy_from_url
+from hierarchy_helpers import hierarchy_from_url
 from agg_config import Config, DEFAULT_CONFIG_DIR
 from agg_rpc import send_rpc
 

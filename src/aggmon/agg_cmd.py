@@ -6,7 +6,8 @@ import sys
 import time
 import json
 from etcd_client import EtcdClient
-from agg_component import ETCD_COMPONENT_PATH, hierarchy_from_url
+from agg_component import ETCD_COMPONENT_PATH
+from hierarchy_helpers import hierarchy_from_url
 from agg_rpc import send_rpc
 
 

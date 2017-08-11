@@ -9,6 +9,7 @@ from agg_rpc import send_rpc, own_addr_for_tgt, RPCThread, RPCNoReplyError
 from agg_job_command import send_agg_command
 from etcd_client import *
 from repeat_timer import RepeatTimer
+from hierarchy_helpers import hierarchy_from_url
 
 
 log = logging.getLogger( __name__ )
@@ -38,29 +39,6 @@ def component_key(keys, kwds):
         elif len(key) > 0:
             return ":".join(key) + ":"
     return ":".join(key)
-
-
-def hierarchy_from_url(url):
-    """
-    Decode hierarchy and hierarchy_key from a hierarchy URL.
-
-    The URL has the format:
-    <hierarchy_name>:<hierarchy_path>
-    for example:
-    monitor:/universe/rack2
-
-    This function returns a tuple made of the hierarchy name and a flattened "hierarchy_key",
-    for example: ("universe", "universe_rack2")
-    The hierarchy_key can be used as a shard key in the data stores.
-    """
-    hierarchy = None
-    key = None
-    path = None
-    if url.find(":") > 0:
-        hierarchy = url[: url.find(":")]
-        path = url[url.find(":") + 1 :]
-    key = "_".join(path.split("/")[1:])
-    return hierarchy, key, path
 
 
 def check_output(*popenargs, **kwargs):

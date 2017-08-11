@@ -14,7 +14,8 @@ except ImportError:
     import json
 import zmq
 from Queue import Queue, Empty
-from agg_component import get_kwds, ComponentState, hierarchy_from_url
+from agg_component import get_kwds, ComponentState
+from hierarchy_helpers import hierarchy_from_url
 from agg_rpc import *
 from agg_config import Config, DEFAULT_CONFIG_DIR
 # Path Fix
