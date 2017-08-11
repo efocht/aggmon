@@ -17,10 +17,10 @@ config:
             cmdport_range: 5100-5199
             listen_port_range: 5200-5299
             logfile: /tmp/%(service)s_%(hierarchy)s_%(hierarchy_key)s.log
-        job_agg:
+        aggregator:
             cmdport_range: 5000-5999
             listen_port_range: 5300-5999
-            logfile: /tmp/%(service)s_%(jobid)s.log
+            logfile: /tmp/%(service)s_%(hierarchy_key)s.log
     database:
         dbname: metricdb
         dbhost: "localhost:27017"
