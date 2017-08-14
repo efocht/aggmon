@@ -286,6 +286,8 @@ def aggmon_agg(argv):
         Create one timer for an aggregator config. An aggregator config can
         trigger the aggregation of multiple metrics.
         """
+        if hierarchy != cfg["agg_class"]:
+            return
         if "push_target" in cfg and cfg["push_target"].startswith("@"):
             push_target = resolve_push_target(pargs.hierarchy_url, cfg["push_target"])
             if push_target is None:
@@ -293,10 +295,9 @@ def aggmon_agg(argv):
                           (cfg["push_target"], pargs.hierarchy_url))
                 return
             cfg["push_target"] = push_target
-        if hierarchy == cfg["agg_class"]:
-            interval = cfg["interval"]
-            t = RepeatEvent(scheduler, interval, _aggregate_rpc, **cfg)
-            return t
+        interval = cfg["interval"]
+        t = RepeatEvent(scheduler, interval, _aggregate_rpc, **cfg)
+        return t
 
     def show_mcache(msg):
         return agg.metric_caches
