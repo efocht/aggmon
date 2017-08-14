@@ -138,16 +138,10 @@ def aggmon_data_store(argv):
     store.start()
 
     context = zmq.Context()
+    listener = Listener(zmq_context, pargs.listen, queue=store.queue, component=comp)
+    listener.start()
 
-    # Socket to receive messages on
-    receiver = context.socket(zmq.PULL)
-    receiver.setsockopt(zmq.RCVHWM, 40000)
-    recv_port = zmq_socket_bind_range(receiver, pargs.listen)
-    assert( recv_port is not None)
-
-    me_addr = zmq_own_addr_for_uri(pargs.dispatcher)
-    me_listen = "tcp://%s:%d" % (me_addr, recv_port)
-    state = get_kwds(listen=me_listen)
+    state = get_kwds(listen=listener.listen)
     comp.update_state_cache(state)
 
     def subscribe_collectors(__msg):
@@ -174,6 +168,7 @@ def aggmon_data_store(argv):
     comp.rpc.register_rpc("reset_stats", reset_stats)
 
     # subscribe to message bus
+    # TODO: this should recover even if collectors are not online
     subscribe_collectors(None)
 
     tstart = None

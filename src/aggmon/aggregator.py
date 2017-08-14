@@ -24,6 +24,7 @@ import basic_aggregators as aggs
 from agg_config import Config, DEFAULT_CONFIG_DIR
 from repeat_event import RepeatEvent
 from scheduler import Scheduler
+from listener import Listener
 
 
 log = logging.getLogger( __name__ )
@@ -241,21 +242,13 @@ def aggmon_agg(argv):
         log.error("Failed to create Aggregator %s : %r" % (pargs.hierarchy_url, e))
         sys.exit(1)
     agg.start()
-
-    # Socket to receive messages on
-    receiver = zmq_context.socket(zmq.PULL)
-    receiver.setsockopt(zmq.RCVHWM, 40000)
-    receiver.setsockopt(zmq.RCVTIMEO, 1000)
-    receiver.setsockopt(zmq.LINGER, 0)
-    recv_port = zmq_socket_bind_range(receiver, pargs.listen)
-    assert(recv_port is not None)
-
-    me_addr = own_addr_for_tgt("8.8.8.8")
-    me_listen = "tcp://%s:%d" % (me_addr, recv_port)
-    state = get_kwds(listen=me_listen)
-    comp = ComponentState(etcd_client, "aggregator", pargs.hierarchy_url, state=state)
+    comp = ComponentState(etcd_client, "aggregator", pargs.hierarchy_url)
+    listener = Listener(zmq_context, pargs.listen, queue=agg.queue, component=comp)
+    listener.start()
+    comp.update_state_cache({"listen": listener.listen})
     comp.start()
 
+    state = get_kwds(listen=listener.listen)
     collectors_rpc_paths = []
     for cstate in comp.iter_components_state(component_type="collector"):
         if hierarchy == "job":
@@ -288,26 +281,22 @@ def aggmon_agg(argv):
         aggs_sent = comp.state.get("stats.aggs_sent", 0) + num_sent
         comp.update_state_cache({"stats.agg_rpcs": agg_rpcs, "stats.aggs_sent": aggs_sent})
 
-    def make_timers():
+    def make_timer(cfg):
         """
-        Create one timer for each aggregator config. An aggregator config can
+        Create one timer for an aggregator config. An aggregator config can
         trigger the aggregation of multiple metrics.
         """
-        timers = []
-        for cfg in config.get("/aggregate"):
-            if "push_target" in cfg and cfg["push_target"].startswith("@"):
-                push_target = resolve_push_target(pargs.hierarchy_url, cfg["push_target"])
-                if push_target is None:
-                    log.error("Could not resolve push_target '%s' for aggregator at %s" %
-                              (cfg["push_target"], pargs.hierarchy_url))
-                    continue
-                cfg["push_target"] = push_target
-            if hierarchy == cfg["agg_class"]:
-                interval = cfg["interval"]
-                t = RepeatEvent(scheduler, interval, _aggregate_rpc, **cfg)
-                timers.append(t)
-        log.info("made timers for '%s': %r" % (pargs.hierarchy_url, timers))
-        return timers
+        if "push_target" in cfg and cfg["push_target"].startswith("@"):
+            push_target = resolve_push_target(pargs.hierarchy_url, cfg["push_target"])
+            if push_target is None:
+                log.error("Could not resolve push_target '%s' for aggregator at %s" %
+                          (cfg["push_target"], pargs.hierarchy_url))
+                return
+            cfg["push_target"] = push_target
+        if hierarchy == cfg["agg_class"]:
+            interval = cfg["interval"]
+            t = RepeatEvent(scheduler, interval, _aggregate_rpc, **cfg)
+            return t
 
     def show_mcache(msg):
         return agg.metric_caches
@@ -329,7 +318,8 @@ def aggmon_agg(argv):
         global main_stopping
         for rpc_path in collectors_rpc_paths:
             log.info( "unsubscribing jobid %s from %s" % (pargs.jobid, rpc_path) )
-            send_rpc(etcd_client, rpc_path, "unsubscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port))
+            send_rpc(etcd_client, rpc_path, "unsubscribe",
+                     TARGET="tcp://%s:%d" % (me_addr, recv_port))
         main_stopping = True
         time.sleep(10)
         os._exit(0)
@@ -344,41 +334,32 @@ def aggmon_agg(argv):
     comp.rpc.register_rpc("show_mcache", show_mcache)
     comp.rpc.register_rpc("resend_state", comp.reset_timer)
 
-    # TODO: make this react to configuration changes
-    #       and retry to subscribe to collectors that are temporarily not available
-    #       or not yet available.
-    make_timers()
-
-    tstart = None
-    log.info( "Started msg receiver on %s" % pargs.listen )
-    count = 0
+    timers = {}
     while not main_stopping:
-        try:
-            s = receiver.recv()
-            #log.debug("received msg on PULL port: %r" % s)
-            msg = json.loads(s)
+        new_cfgs = {}
+        for cfg in config.get("/aggregate"):
+            tkey = "%r" % cfg
+            new_cfgs[tkey] = cfg
 
-            agg.queue.put(msg)
-            if count == 0:
-                tstart = time.time()
-                count = 0
-            count += 1
-            comp.update_state_cache({"stats.val_msgs_recvd": count})
-            if (pargs.stats and count % 10000 == 0):
-                tend = time.time()
-                sys.stderr.write("%d msgs in %f seconds, %f msg/s\n" %
-                                 (count, tend - tstart, float(count)/(tend - tstart)))
-                sys.stderr.flush()
-        except zmq.error.Again as e:
-            continue
-        except Exception as e:
-            print "Exception in msg receiver: %r" % e
-            agg.stopping = True
-            break
+        # any aggregator configs that have been removed?
+        for tkey in set(timers.keys()) - set(new_cfgs.keys()):
+            timers[tkey].stop()
+            del timers[tkey]
 
-    time.sleep(0.1)
-    print "%d messages received" % count
+        # are there new aggregator configs?
+        for tkey in set(new_cfgs.keys()) - set(timers.keys()):
+            timer = make_timer(new_cfgs[tkey])
+            if timer is not None:
+                timers[tkey] = timer
+                log.info("Made timer for aggregation '%r'" % tkey)
+        #
+        delay = 20
+        while not main_stopping and delay > 0:
+            delay -= 0.3
+            time.sleep(0.3)
+
     #pdb.set_trace()
+    listener.join()
     comp.rpc.stop()
     comp.rpc.join()
     agg.stopping = True

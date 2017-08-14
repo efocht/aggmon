@@ -31,6 +31,7 @@ from agg_component import get_kwds, ComponentState
 from agg_config import Config, DEFAULT_CONFIG_DIR
 from agg_rpc import *
 from msg_tagger import MsgTagger
+from listener import Listener
 from etcd import EtcdWatchTimedOut
 
 
@@ -190,8 +191,8 @@ class AggPubMatch(object):
 
 
 class AggPubThread(threading.Thread, AggPubMatch):
-    def __init__(self, zmq_context, queue, subs={}, tagger=None):
-        self.queue = queue
+    def __init__(self, zmq_context, subs={}, tagger=None):
+        self.queue = Queue()
         self.tagger = tagger
         self.stopping = False
         threading.Thread.__init__(self)
@@ -242,64 +243,6 @@ class AggPubThread(threading.Thread, AggPubMatch):
             except Exception as e:
                 log.error( "Exception in AggPubThread: %r" % e )
                 continue
-        
-
-class SubscriberQueue(threading.Thread):
-    def __init__(self, zmq_context, listen="tcp://0.0.0.0:5555", pre=[]):
-        """
-        pre: chain of functions that processes the message before putting it into the queue
-        """
-        self.queue = Queue()
-        self.pre = pre
-        # Socket to receive messages on
-        self.receiver = zmq_context.socket(zmq.PULL)
-        self.receiver.setsockopt(zmq.RCVHWM, 40000)
-        self.port = zmq_socket_bind_range(self.receiver, listen)
-        assert( self.port is not None)
-        self.listen = ":".join(listen.split(":")[:2] + [str(self.port)])
-        self.stopping = False
-        threading.Thread.__init__(self)
-        self.daemon = True
-
-    def run(self):
-        log.info( "[Started SubCmdThread listening on %s]" % self.listen )
-        self.msg_receiver()
-
-    def msg_receiver(self):
-        global component
-        # Start our clock now
-        tstart = None
-        
-        log.info( "Started msg receiver on %s" % self.listen )
-        count = 0
-        while not self.stopping:
-            try:
-                s = self.receiver.recv()
-                msg = json.loads(s)
-                #log.debug("received: %r" % msg)
-
-                for pre in self.pre:
-                    msg = pre(msg)
-
-                self.queue.put(msg)
-                if count == 0:
-                    tstart = time.time()
-                count += 1
-                if component is not None:
-                    component.update({"stats.msgs_recvd": count})
-                if count % 10000 == 0 or "PRINT" in msg:
-                #if count % 10 == 0 or "PRINT" in msg:
-                    tend = time.time()
-                    sys.stdout.write("%d msgs in %f seconds, %f msg/s\n" %
-                                     (count, tend - tstart, float(count)/(tend - tstart)))
-                    if "PRINT" in msg:
-                        sys.stdout.write("Msg is %r\ncount = %d" % (msg, count))
-                    sys.stdout.flush()
-            except Exception as e:
-                log.error("Exception in msg receiver: %r" % e)
-                # if something breaks, continue anyway
-                #break
-        log.info("%d messages received" % count)
 
 
 def test_pub():
@@ -386,29 +329,28 @@ def aggmon_collector(argv):
 
     try:
         context = zmq.Context()
-        subq = SubscriberQueue(context, pargs.listen, pre=[spoofed_host, convert_str_int_float])
         tagger = MsgTagger(tags=saved_tags)
-        pubsub = AggPubThread(context, subq.queue, subs=saved_subs, tagger=tagger.do_tag)
+        pubsub = AggPubThread(context, subs=saved_subs, tagger=tagger.do_tag)
+        listener = Listener(context, pargs.listen, queue=pubsub.queue, component=comp,
+                            pre=[spoofed_host, convert_str_int_float])
     except Exception as e:
         log.error(traceback.format_exc())
         log.error("Failed to initialize something essential. Exiting.")
         os._exit(1)
 
-    me_addr = own_addr_for_tgt("8.8.8.8")
-    me_listen = "tcp://%s:%d" % (me_addr, subq.port)
-    state = get_kwds(listen=me_listen)
+    state = get_kwds(listen=listener.listen)
     comp.update_state_cache(state)
 
     pubsub.start()
-    subq.start()
+    listener.start()
     comp.start()
-    atexit.register(join_threads, subq)
+    atexit.register(join_threads, listener)
 
     #
     # RPC functions and helpers
     #
     def quit(msg):
-        subq.stopping = True
+        listener.stopping = True
         # raw exit for now
         os._exit(0)
 
@@ -469,9 +411,9 @@ def aggmon_collector(argv):
             time.sleep(1)
 
 
-def join_threads(subq):
+def join_threads(listener):
     try:
-        subq.join(0.1)
+        listener.join(0.1)
     except Exception as e:
         log.error("main thread exception: %r" % e)
     log.debug("leaving...")

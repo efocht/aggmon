@@ -27,7 +27,7 @@ def hierarchy_from_url(url):
 
 def parent_hierarchy_url(hierarchy_url):
     hname, hkey, hpath = hierarchy_from_url(hierarchy_url)
-    if hierarchy is None:
+    if hname is None:
         return None
     parent_hpath = "/".join(hpath.split("/")[:-1])
     if not parent_hpath:
@@ -36,7 +36,7 @@ def parent_hierarchy_url(hierarchy_url):
 
 def top_hierarchy_url(hierarchy_url):
     hname, hkey, hpath = hierarchy_from_url(hierarchy_url)
-    if hierarchy is None:
+    if hname is None:
         return None
     top_hpath = "/".join(hpath.split("/")[:2])
     return "%s:%s" % (hname, top_hpath)

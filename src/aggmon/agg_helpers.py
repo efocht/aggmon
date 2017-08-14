@@ -1,4 +1,5 @@
 import logging
+import socket
 
 
 log = logging.getLogger( __name__ )
@@ -42,3 +43,23 @@ def zmq_socket_bind_range(sock, listen):
                 else:
                     break
     return port
+
+def own_addr_for_tgt(target):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect((target, 0))
+    addr = s.getsockname()[0]
+    s.close()
+    return addr
+
+
+def own_addr_for_uri(uri):
+    proto, addr, port = uri_split(uri)
+    return own_addr_for_tgt(addr)
+
+
+def uri_split(uri):
+    proto, addr, port = uri.split(":")
+    addr = addr.lstrip("/")
+    return proto, addr, port
+
+
