@@ -29,6 +29,7 @@ class Listener(threading.Thread):
         """
         self.queue = queue
         self.comp = component
+        self.count = 0
         self.pre = pre
         # Socket to receive messages on
         self.receiver = zmq_context.socket(zmq.PULL)
@@ -55,7 +56,7 @@ class Listener(threading.Thread):
         tstart = None
         
         log.info( "Started msg receiver on %s" % self.listen )
-        count = 0
+        self.count = 0
         while not self.stopping:
             try:
                 s = self.receiver.recv()
@@ -66,17 +67,17 @@ class Listener(threading.Thread):
                     msg = pre(msg)
 
                 self.queue.put(msg)
-                if count == 0:
+                if self.count == 0:
                     tstart = time.time()
                 count += 1
                 if self.comp is not None:
-                    self.comp.update_state_cache({"stats.msgs_recvd": count})
+                    self.comp.update_state_cache({"stats.msgs_recvd": self.count})
             except zmq.error.Again as e:
                 continue
             except Exception as e:
                 log.error("Exception in msg receiver: %r" % e)
                 # if something breaks, continue anyway
                 #break
-        log.info("%d messages received" % count)
+        log.info("%d messages received" % self.count)
 
 

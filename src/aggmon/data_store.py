@@ -28,7 +28,7 @@ from metric_store.influxdb_store import InfluxDBMetricStore
 
 
 log = logging.getLogger( __name__ )
-msgs_count = 0
+main_stopping = False
 
 
 class DataStore(threading.Thread):
@@ -90,9 +90,12 @@ def aggmon_data_store(argv):
                     help="position in hierarchy for this component, eg. group:/universe")
     ap.add_argument('-L', '--listen', default="tcp://127.0.0.1:5555",
                     action="store", help="zmq pull port to listen on")
-    ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR, action="store", help="configuration directory")
-    ap.add_argument('-e', '--expire', default=180, action="store", help="days for expiring value metrics")
-    ap.add_argument('-b', '--backend', default="mongodb", action="store", help="database backend(s), comma separated. Default is 'mongodb'.")
+    ap.add_argument('-c', '--config', default=DEFAULT_CONFIG_DIR, action="store",
+                    help="configuration directory")
+    ap.add_argument('-e', '--expire', default=180, action="store",
+                    help="days for expiring value metrics")
+    ap.add_argument('-b', '--backend', default="mongodb", action="store",
+                    help="database backend(s), comma separated. Default is 'mongodb'.")
     ap.add_argument('-N', '--host', default="localhost", action="store", help="data store host")
     ap.add_argument('-n', '--port', default=None, action="store", help="data store port")
     ap.add_argument('-d', '--dbname', default="metricdb", action="store", help="database name")
@@ -144,17 +147,11 @@ def aggmon_data_store(argv):
     state = get_kwds(listen=listener.listen)
     comp.update_state_cache(state)
 
-    def subscribe_collectors(__msg):
-        for msgb in pargs.msgbus:
-            log.info( "subscribing to all msgs at '%s'" % msgb )
-            me_addr = zmq_own_addr_for_uri(msgb)
-            send_rpc(context, msgb, "subscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port))
-
     def unsubscribe_and_quit(__msg):
         for msgb in pargs.msgbus:
             log.info( "unsubscribing from '%s'" % msgb )
             me_addr = zmq_own_addr_for_uri(msgb)
-            send_rpc(context, msgb, "unsubscribe", TARGET="tcp://%s:%d" % (me_addr, recv_port))
+            send_rpc(context, msgb, "unsubscribe", TARGET=listener.listen)
         os._exit(0)
 
     def reset_stats(__msg):
@@ -171,30 +168,25 @@ def aggmon_data_store(argv):
     # TODO: this should recover even if collectors are not online
     subscribe_collectors(None)
 
-    tstart = None
-    log.info( "Started msg receiver on %s" % pargs.listen )
-    msgs_count = 0
-    while True:
-        try:
-            s = receiver.recv()
-            log.debug("received msg on PULL port: %r" % s)
-            msg = json.loads(s)
+    collector_rpc_path = None
+    for cstate in comp.iter_components_state(component_type="collector"):
+        if hierarchy == "group":
+            if "hierarchy_url" in cstate and cstate["hierarchy_url"] == pargs.hierarchy_url:
+                collector_rpc_path = cstate["rpc_path"]
+                break
 
-            store.queue.put(msg)
-            if count == 0:
-                tstart = time.time()
-                msgs_count = 0
-            msgs_count += 1
-            comp.update_state_cache({"stats.msgs_recvd": count})
-            if (pargs.stats and count % 100000 == 0):
-                tend = time.time()
-                sys.stdout.write("%d msgs in %f seconds, %f msg/s\n" %
-                                 (msgs_count, tend - tstart,
-                                  float(msgs_count)/(tend - tstart)))
-                sys.stdout.flush()
-        except Exception as e:
-            print "Exception in msg receiver: %r" % e
-            break
+    subscribed = False
+    while not main_stopping:
+        if not subscribed and collector_rpc_path is not None:
+            log.info( "subscribing to all msgs at '%s'" % collector_rpc_path )
+            subscribed = send_rpc(context, collector_rpc_path,
+                                  "subscribe", TARGET=listener.listen)
+        #
+        delay = 20
+        while not main_stopping and delay > 0:
+            delay -= 0.3
+            time.sleep(0.3)
+
     log.info("THE END")
     os._exit(1)
 

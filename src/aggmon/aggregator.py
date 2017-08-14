@@ -313,14 +313,14 @@ def aggmon_agg(argv):
         for rpc_path in collectors_rpc_paths:
             log.info( "subscribing to %s, filter = %r" % (rpc_path, kwds) )
             send_rpc(etcd_client, rpc_path, "subscribe",
-                     TARGET="tcp://%s:%d" % (me_addr, recv_port), **kwds)
+                     TARGET=listener.listen, **kwds)
 
     def unsubscribe_and_quit(__msg):
         global main_stopping
         for rpc_path in collectors_rpc_paths:
             log.info( "unsubscribing jobid %s from %s" % (pargs.jobid, rpc_path) )
             send_rpc(etcd_client, rpc_path, "unsubscribe",
-                     TARGET="tcp://%s:%d" % (me_addr, recv_port))
+                     TARGET=listener.listen)
         main_stopping = True
         time.sleep(10)
         os._exit(0)
