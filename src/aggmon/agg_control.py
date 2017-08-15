@@ -28,6 +28,7 @@ from agg_rpc import *
 from msg_tagger import MsgTagger
 
 
+SERVICE_START_TIMEOUT = 120  # timeout for service start, in seconds
 log = logging.getLogger( __name__ )
 comp = None
 etcd_client = None
@@ -184,6 +185,19 @@ def aggmon_control(argv):
         kill_services = True
         running = False
 
+    def start_in_progress(path):
+        try:
+            data = comp.get_data(path)
+        except:
+            return False
+        if data.startswith("started "):
+            data = data[8:]
+            started = time.mktime(time.strptime(data))
+            now = time.time()
+            if now - started > 0 and now - started < SERVICE_START_TIMEOUT:
+                return True
+        return False
+
     state = get_kwds(own_groups=pargs.group)
     hostname = platform.node()
     
@@ -229,13 +243,15 @@ def aggmon_control(argv):
                 for gpath in own_groups_hpath:
                     svc_state = comp.get_state(svc_type, "group:%s" % gpath)
                     if svc_state is None or svc_state == {}:
+                        data_path = "/components/%s/group/%s" % (svc_type, own_groups_keys[gpath])
+                        if start_in_progress(data_path):
+                            continue
                         #
                         # start service!
                         #
                         ## TODO: select_host_to_run_on
                         control.start_component(svc_type, "group:%s" % gpath)
-                        comp.set_data("/components/%s/group/%s" % (svc_type, own_groups_keys[gpath]),
-                                      "started %s" % time.ctime())
+                        comp.set_data(data_path, "started %s" % time.ctime())
                 #
                 # TODO: handle deconfigured groups
                 #
@@ -249,13 +265,15 @@ def aggmon_control(argv):
                 #
                 for jobid in own_jobids:
                     svc_state = comp.get_state(svc_type, "job:/%s" % jobid)
-                    if svc_state is None:
+                    if svc_state is None or svc_state == {}:
+                        data_path = "/components/%s/job/%s" % (svc_type, jobid)
+                        if start_in_progress(data_path):
+                            continue
                         #
                         # start service!
                         #
                         control.start_component(svc_type, "job:/%s" % jobid)
-                        comp.set_data("/components/%s/job/%s" % (svc_type, jobid),
-                                      "started %s" % time.ctime())
+                        comp.set_data(data_path, "started %s" % time.ctime())
                 #
                 # handle finished jobs
                 #
@@ -270,7 +288,7 @@ def aggmon_control(argv):
                             control.kill_component(svc_type, "job:/%s" % jobid)
                         else:
                             comp.del_data("/components/%s/job/%s" % (svc_type, jobid))
-        delay = 20 # seconds
+        delay = 5 # seconds
         while running and delay > 0:
             time.sleep(1)
             delay -= 1
@@ -280,7 +298,7 @@ def aggmon_control(argv):
         for svc_type in own_services.keys():
             for hierarchy in own_services[svc_type].keys():
                 for hierarchy_key in own_services[svc_type][hierarchy].keys():
-                    hpath = config.get("hierarchy/%s/%s/hpath" %
+                    hpath = config.get("/hierarchy/%s/%s/hpath" %
                                        (hierarchy, hierarchy_key))
                     svc_state = comp.get_state(svc_type, "%s:/%s" % (hierarchy, hpath))
                     if svc_state is not None:

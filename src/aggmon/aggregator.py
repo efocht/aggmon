@@ -249,13 +249,13 @@ def aggmon_agg(argv):
     comp.start()
 
     state = get_kwds(listen=listener.listen)
-    collectors_rpc_paths = []
+    collectors_subscribe = {}
     for cstate in comp.iter_components_state(component_type="collector"):
         if hierarchy == "job":
-            collectors_rpc_paths.append(cstate["rpc_path"])
+            collectors_subscribe[cstate["rpc_path"]] = False
         elif hierarchy == "group":
             if "hierarchy_url" in cstate and cstate["hierarchy_url"] == pargs.hierarchy_url:
-                collectors_rpc_paths.append(cstate["rpc_path"])
+                collectors_subscribe[cstate["rpc_path"]] = False
             else:
                 pass
 
@@ -310,15 +310,23 @@ def aggmon_agg(argv):
         kwds = {}
         if hierarchy == "job":
             kwds["J"] = hkey
-        for rpc_path in collectors_rpc_paths:
+        unsubscribed = len(collectors_subscribe.keys())
+        for rpc_path in collectors_subscribe.keys():
+            if collectors_subscribe[rpc_path] is True:
+                unsubscribed -= 1
+                continue
             log.info( "subscribing to %s, filter = %r" % (rpc_path, kwds) )
-            send_rpc(etcd_client, rpc_path, "subscribe",
-                     TARGET=listener.listen, **kwds)
+            if send_rpc(etcd_client, rpc_path,
+                        "subscribe", TARGET=listener.listen, **kwds):
+                unsubscribed -= 1
+                collectors_subscribe[rpc_path] = True
+        return (unsubscribed == 0)
 
     def unsubscribe_and_quit(__msg):
         global main_stopping
-        for rpc_path in collectors_rpc_paths:
-            log.info( "unsubscribing jobid %s from %s" % (pargs.jobid, rpc_path) )
+        log.info("'quit' rpc received.")
+        for rpc_path in collectors_subscribe.keys():
+            log.info( "unsubscribing aggregator %s from %s" % (pargs.hierarchy_url, rpc_path) )
             send_rpc(etcd_client, rpc_path, "unsubscribe",
                      TARGET=listener.listen)
         main_stopping = True
@@ -337,6 +345,9 @@ def aggmon_agg(argv):
 
     timers = {}
     while not main_stopping:
+        # subscribe_collectors
+        subscribe_collectors({})
+        #
         new_cfgs = {}
         for cfg in config.get("/aggregate"):
             tkey = "%r" % cfg

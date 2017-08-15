@@ -51,15 +51,17 @@ def send_rpc(etcd_client, rpc_cmd_path, cmd, _RPC_TIMEOUT_=RPC_TIMEOUT, **kwds):
         log.debug("Received result: %r" % result)
     except KeyboardInterrupt:
         return None
+    except TypeError:
+        pass
     except Exception as e:
-        log.error("send_rpc failed with '%r'" % e)
+        log.error("send_rpc failed with '%r'\nresult=%r" % (e, result))
 
     # decode result and return it
-    if "RESULT" in result:
+    if isinstance(result, dict) and "RESULT" in result:
         result = result["RESULT"]
         etcd_client.delete(rpc_res_path + "/" + req_key)
     else:
-        raise RPCNoReplyError("RPC server at %s did not reply." % rpc_server)
+        raise RPCNoReplyError("RPC server at %s did not reply." % rpc_cmd_path)
     return result
 
 

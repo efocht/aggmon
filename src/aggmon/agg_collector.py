@@ -350,6 +350,7 @@ def aggmon_collector(argv):
     # RPC functions and helpers
     #
     def quit(msg):
+        log.info("'quit' rpc received.")
         listener.stopping = True
         # raw exit for now
         os._exit(0)

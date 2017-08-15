@@ -1,7 +1,9 @@
 from threading import Timer
+import logging
 
 
 __all__ = ["RepeatTimer"]
+log = logging.getLogger( __name__ )
 
 
 class RepeatTimer(object):
@@ -16,7 +18,8 @@ class RepeatTimer(object):
 
     def _run(self):
         self.is_running = False
-        self.function(*self.args, **self.kwargs)
+        log.debug("timer triggered, function=%s, args=%r" % (self.function.__name__, self.args));
+        res = self.function(*self.args, **self.kwargs)
         self.start()
 
     def start(self):

@@ -83,7 +83,7 @@ class DataStore(threading.Thread):
 
 
 def aggmon_data_store(argv):
-    global msgs_count
+    global main_stopping
 
     ap = argparse.ArgumentParser()
     ap.add_argument('-H', '--hierarchy-url', default="", action="store",
@@ -118,7 +118,6 @@ def aggmon_data_store(argv):
     if hierarchy != "group":
         log.error("Hierarchy '%(hierarchy)s' is currently not supported for data store." % locals())
         os._exit(1)
-
     etcd_client = EtcdClient()
     config = Config(etcd_client)
     comp = ComponentState(etcd_client, "data_store", pargs.hierarchy_url)
@@ -147,39 +146,35 @@ def aggmon_data_store(argv):
     state = get_kwds(listen=listener.listen)
     comp.update_state_cache(state)
 
+    collector_rpc_path = None
+    for cstate in comp.iter_components_state(component_type="collector"):
+        if "hierarchy_url" in cstate and cstate["hierarchy_url"] == pargs.hierarchy_url:
+            collector_rpc_path = cstate["rpc_path"]
+            break
+
     def unsubscribe_and_quit(__msg):
-        for msgb in pargs.msgbus:
-            log.info( "unsubscribing from '%s'" % msgb )
-            me_addr = zmq_own_addr_for_uri(msgb)
-            send_rpc(context, msgb, "unsubscribe", TARGET=listener.listen)
+        global main_stopping
+        log.info("'quit' rpc received.")
+        log.info("unsubscribing from '%s'" % collector_rpc_path)
+        send_rpc(etcd_client, collector_rpc_path, "unsubscribe", TARGET=listener.listen)
+        main_stopping = True
+        time.sleep(6)
         os._exit(0)
 
     def reset_stats(__msg):
-        global msgs_count
-        msgs_count = 0
+        listener.count = 0
 
     comp.start()
     comp.rpc.register_rpc("quit", unsubscribe_and_quit, early_reply=True)
-    comp.rpc.register_rpc("resubscribe", subscribe_collectors)
     comp.rpc.register_rpc("resend_state", comp.reset_timer)
     comp.rpc.register_rpc("reset_stats", reset_stats)
 
-    # subscribe to message bus
-    # TODO: this should recover even if collectors are not online
-    subscribe_collectors(None)
-
-    collector_rpc_path = None
-    for cstate in comp.iter_components_state(component_type="collector"):
-        if hierarchy == "group":
-            if "hierarchy_url" in cstate and cstate["hierarchy_url"] == pargs.hierarchy_url:
-                collector_rpc_path = cstate["rpc_path"]
-                break
-
+    # subscribe to our group's collector
     subscribed = False
     while not main_stopping:
         if not subscribed and collector_rpc_path is not None:
             log.info( "subscribing to all msgs at '%s'" % collector_rpc_path )
-            subscribed = send_rpc(context, collector_rpc_path,
+            subscribed = send_rpc(etcd_client, collector_rpc_path,
                                   "subscribe", TARGET=listener.listen)
         #
         delay = 20

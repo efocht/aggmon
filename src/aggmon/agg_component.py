@@ -184,7 +184,7 @@ class ComponentState(object):
             if r.key.endswith("/state"):
                 yield self.etcd_client.deserialize(r.key)
 
-    def reset_timer(self, *__args, **__kwds):
+    def reset_timer(self):
         if self.timer is not None:
             self.timer.stop()
         # send one state ping message
@@ -192,12 +192,11 @@ class ComponentState(object):
         # and create new repeat timer
         self.timer = RepeatTimer(self.ping_interval, self.set_state)
 
-    def set_state(self, state=None):
-        if state is None:
-            state = self.state
+    def set_state(self):
         try:
-            return self.etcd_client.update(self.etcd_path + "/state", state,
-                                           ttl=int(self.ping_interval*1.3))
+            log.debug("set_state: %s, %r" % (self.etcd_path + "/state", self.state))
+            return self.etcd_client.update(self.etcd_path + "/state", self.state,
+                                           ttl=int(self.ping_interval*1.5))
         except Exception as e:
             log.warning("Etcd error at state update: %r" % e)
 
