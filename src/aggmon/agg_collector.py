@@ -410,6 +410,7 @@ def aggmon_collector(argv):
         while sleep > 0:
             sleep -= 1
             time.sleep(1)
+    comp.stop()
 
 
 def join_threads(listener):

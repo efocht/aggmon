@@ -2,6 +2,7 @@
 #    https://github.com/jplana/python-etcd
 from etcd import *
 from urllib3.exceptions import TimeoutError
+import copy
 import json
 import logging
 import os
@@ -74,13 +75,14 @@ class EtcdClient(Client):
         else:
             self.set(base_path, obj, **kwargs)
 
-    def update(self, path, new, **kwargs):
+    def update(self, path, data, **kwargs):
         """
         Update the etcd directory/key-value hierarchy at _path_ according to the
         object _new_ passed in as argument. Do this with minimal operations.
         New keys will be added, missing keys will be deleted, therefore the API
         is different from what a dict().update() does!
         """
+        new = copy.copy(data)
         old_exists = True
         try:
             old = self.deserialize(path)
@@ -113,6 +115,7 @@ class EtcdClient(Client):
                         del new[key]
             for key, value in new.items():
                 self.update(path + "/" + str(key), value, **kwargs)
+        return True
 
     def get(self, key, **kwargs):
         res = self.read(key, **kwargs)

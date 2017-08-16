@@ -9,7 +9,8 @@ from agg_rpc import send_rpc, RPCThread, RPCNoReplyError
 from agg_job_command import send_agg_command
 from agg_helpers import *
 from etcd_client import *
-from repeat_timer import RepeatTimer
+from scheduler import Scheduler
+from repeat_event import RepeatEvent
 from hierarchy_helpers import hierarchy_from_url
 from listener import Listener
 
@@ -82,6 +83,7 @@ class ComponentState(object):
     def __init__(self, etcd_client, component_type, hierarchy_url,
                  ping_interval=DEFAULT_PING_INTERVAL, state={}):
         self.etcd_client = etcd_client
+        self.scheduler = Scheduler()
         self.component_type = component_type
         self.hierarchy_url = hierarchy_url
         hierarchy, component_id, hierarchy_path = hierarchy_from_url(hierarchy_url)
@@ -190,13 +192,13 @@ class ComponentState(object):
         # send one state ping message
         self.set_state()
         # and create new repeat timer
-        self.timer = RepeatTimer(self.ping_interval, self.set_state)
+        self.timer = RepeatEvent(self.scheduler, self.ping_interval, self.set_state)
 
     def set_state(self):
         try:
             log.debug("set_state: %s, %r" % (self.etcd_path + "/state", self.state))
-            return self.etcd_client.update(self.etcd_path + "/state", self.state,
-                                           ttl=int(self.ping_interval*1.5))
+            res = self.etcd_client.update(self.etcd_path + "/state", self.state,
+                                          ttl=int(self.ping_interval*1.5))
         except Exception as e:
             log.warning("Etcd error at state update: %r" % e)
 
@@ -212,8 +214,15 @@ class ComponentState(object):
             log.warning("Etcd error while saving data (%s): %r" % (path, e))
 
     def start(self):
+        self.scheduler.start()
         self.rpc.start()
         self.reset_timer()
+
+    def stop(self):
+        self.rpc.stop()
+        if self.timer is not None:
+            self.timer.stop()
+        self.scheduler.stop()
 
     def update_state_cache(self, state):
         """

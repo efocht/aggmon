@@ -5,6 +5,7 @@ from threading import Thread
 class Scheduler(Thread):
     def __init__(self):
         Thread.__init__(self)
+        self.daemon = True
         self.sched = sched.scheduler(time.time, time.sleep)
         self.stopping = False
 

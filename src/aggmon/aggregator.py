@@ -23,7 +23,6 @@ from agg_rpc import *
 import basic_aggregators as aggs
 from agg_config import Config, DEFAULT_CONFIG_DIR
 from repeat_event import RepeatEvent
-from scheduler import Scheduler
 from listener import Listener
 
 
@@ -229,8 +228,6 @@ def aggmon_agg(argv):
 
     etcd_client = EtcdClient()
     config = Config(etcd_client, config_dir=pargs.config)
-    scheduler = Scheduler()
-    scheduler.start()
 
     for signum in (signal.SIGINT, signal.SIGQUIT, signal.SIGHUP, signal.SIGTERM):
         signal.signal(signum, sig_handler)
@@ -296,7 +293,7 @@ def aggmon_agg(argv):
                 return
             cfg["push_target"] = push_target
         interval = cfg["interval"]
-        t = RepeatEvent(scheduler, interval, _aggregate_rpc, **cfg)
+        t = RepeatEvent(comp.scheduler, interval, _aggregate_rpc, **cfg)
         return t
 
     def show_mcache(msg):

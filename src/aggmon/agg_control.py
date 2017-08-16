@@ -242,6 +242,7 @@ def aggmon_control(argv):
                 #
                 for gpath in own_groups_hpath:
                     svc_state = comp.get_state(svc_type, "group:%s" % gpath)
+                    log.info("%s group:%s %r" % (svc_type, gpath, svc_state))
                     if svc_state is None or svc_state == {}:
                         data_path = "/components/%s/group/%s" % (svc_type, own_groups_keys[gpath])
                         if start_in_progress(data_path):
@@ -288,7 +289,7 @@ def aggmon_control(argv):
                             control.kill_component(svc_type, "job:/%s" % jobid)
                         else:
                             comp.del_data("/components/%s/job/%s" % (svc_type, jobid))
-        delay = 5 # seconds
+        delay = 20 # seconds
         while running and delay > 0:
             time.sleep(1)
             delay -= 1

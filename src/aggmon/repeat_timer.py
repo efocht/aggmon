@@ -18,8 +18,8 @@ class RepeatTimer(object):
 
     def _run(self):
         self.is_running = False
-        log.debug("timer triggered, function=%s, args=%r" % (self.function.__name__, self.args));
         res = self.function(*self.args, **self.kwargs)
+        log.debug("timer triggered, function=%s, args=%r, res=%r" % (self.function.__name__, self.args, res));
         self.start()
 
     def start(self):
