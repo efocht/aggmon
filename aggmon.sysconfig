@@ -1,0 +1,5 @@
+GROUP=/universe
+CONFIGDIR=/etc/aggmon
+ETCDHOST=localhost
+ETCDPORT=2379
+

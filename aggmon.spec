@@ -25,7 +25,7 @@ python2 -m compileall .
 %install
 rm -rf %{buildroot}
 install -m 755 -d %{buildroot}/%{_unitdir}
-install -m 644 aggmon.service %{buildroot}/%{_unitdir}/
+install -m 644 aggmon.service %{buildroot}/%{_unitdir}
 
 install -m 755 -d %{buildroot}/%{_bindir}
 for P in bin/*; do
@@ -39,23 +39,27 @@ for D in aggmon res_mngr metric_store; do
         install -m 644 "$P" %{buildroot}/%{python_sitelib}/"$D"/
     done
 done
-install -m 644 src/aggmon/module-quantiles/quantiles.so %{buildroot}/%{python_sitelib}/aggmon/
+install -m 644 src/aggmon/module-quantiles/quantiles.so %{buildroot}/%{python_sitelib}/%{name}/
 
 install -m 755 -d %{buildroot}/%{_sysconfdir}/%{name}
 for P in config.d/*; do
     install -m 644 "$P" %{buildroot}/%{_sysconfdir}/%{name}
 done
 
+install -m 755 -d %{buildroot}/%{_sysconfdir}/sysconfig
+install -m 644 aggmon.sysconfig %{buildroot}/%{_sysconfdir}/sysconfig/%{name}
+
 %clean
 rm -rf %{buildroot}
 
 %files
 %defattr(-, root, root)
-%{python_sitelib}/aggmon/*
+%config(noreplace) %{_sysconfdir}/%{name}/*
+%config(noreplace) %{_sysconfdir}/sysconfig/*
+%{python_sitelib}/%{name}/*
 %{python_sitelib}/res_mngr/*
-%{_bindir}/*
 %{_unitdir}/*
-%{_sysconfdir}/*
+%{_bindir}/*
 
 %package -n metric-store
 Summary: MetricStore abstraction layer

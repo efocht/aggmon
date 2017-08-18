@@ -7,22 +7,11 @@ Wants=mongodb.service
 [Service]
 Type=simple
 
-Environment=statedir=/var/cache/aggmon
+EnvironmentFile=-/etc/sysconfig/aggmon
 Environment=agg_configdir=/etc/aggmon
-Environment=agg_statedir=/var/lib/aggmon
-Environment=agg_statefile=/var/lib/aggmon/agg_control.state
-Environment=agg_pidfile=/var/run/agg_control.pid
-PIDFile=/var/lib/aggmon/agg_control.pid
-ExecStartPre=/bin/mkdir -p ${statedir}
-ExecStartPre=/bin/mkdir -p ${agg_statedir}
-ExecStart=/usr/bin/agg_control -c ${agg_configdir} \
-                               --state-file ${agg_statefile} \
-                               --pid-file ${agg_pidfile} 
-ExecStop=/usr/bin/agg_control -c ${agg_configdir} \
-                              --state-file ${agg_statefile} \
-                              --pid-file ${agg_pidfile} \
-                              --kill
-ExecStopPost=/bin/bash -c 'test -f ${agg_pidfile} && ps -p `cat ${agg_pidfile}` && kill `cat ${agg_pidfile}`;rm -f ${agg_pidfile}'
+ExecStart=/usr/bin/agg_control -g $GROUP -c $CONFIGDIR
+ExecStop=/usr/bin/agg_cmd -C control -H monnodes:/localhost raw quit
 
 [Install]
 WantedBy=multi-user.target
+
