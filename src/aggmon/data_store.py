@@ -18,6 +18,7 @@ from agg_component import get_kwds, ComponentState
 from hierarchy_helpers import hierarchy_from_url
 from agg_rpc import *
 from agg_config import Config, DEFAULT_CONFIG_DIR
+from listener import Listener
 # Path Fix
 sys.path.append(
     os.path.abspath(
@@ -139,7 +140,7 @@ def aggmon_data_store(argv):
         os._exit(1)
     store.start()
 
-    context = zmq.Context()
+    zmq_context = zmq.Context()
     listener = Listener(zmq_context, pargs.listen, queue=store.queue, component=comp)
     listener.start()
 
