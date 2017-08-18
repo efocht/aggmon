@@ -52,7 +52,7 @@ DEFAULT_CONFIG = {
         "data_store": {
             "cwd": os.getcwd(),
             "cmd": "agg_datastore",
-            "cmd_opts": "--listen %(listen)s --dbname \"%(dbname)s\" " +
+            "cmd_opts": "--listen %(listen)s --dbname \"%(dbname)s\" --backend %(backend)s " +
                         "--host \"%(dbhost)s\" --hierarchy-url %(hierarchy_url)s",
             "component_key":  "group:host",
             "listen_port_range": "5200-5299",
@@ -78,7 +78,8 @@ DEFAULT_CONFIG = {
         "jobdbname": "metric",
         "dbhost": "localhost:27017",
         "user": "",
-        "password": ""
+        "password": "",
+        "backend" : "mongodb"
     },
     "resource_manager": {
         "type": "pbs",
