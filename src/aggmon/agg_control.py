@@ -190,7 +190,7 @@ def aggmon_control(argv):
             data = comp.get_data(path)
         except:
             return False
-        if data.startswith("started "):
+        if data is not None and data.startswith("started "):
             data = data[8:]
             started = time.mktime(time.strptime(data))
             now = time.time()
